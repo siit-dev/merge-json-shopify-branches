@@ -26,7 +26,7 @@ inputs:
     description: 'Check JSON validity'
     default: 'true'
   formatter-command:
-    required: false
+    required: true
     description: 'Formatter command'
     default: ''
   commit-message:
