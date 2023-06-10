@@ -102,11 +102,11 @@ async function run(): Promise<void> {
     const result: GitMergerResult = await merger.run()
 
     // Output the result
-    core.setOutput('hasConflict', result.hasConflict)
-    core.setOutput('hasErrors', result.hasErrors)
-    core.setOutput('error', result.error)
-    core.setOutput('hasCommitted', result.hasCommitted)
-    core.setOutput('mergedFiles', result.mergedFiles)
+    core.setOutput('hasConflict', result.hasConflict ? 'true' : 'false')
+    core.setOutput('hasErrors', result.hasErrors ? 'true' : 'false')
+    core.setOutput('error', result.error || '')
+    core.setOutput('hasCommitted', result.hasCommitted ? 'true' : 'false')
+    core.setOutput('mergedFiles', result.mergedFiles || '')
     core.setOutput('log', mergerLog.join('\n'))
 
     if (result.hasConflict) {
