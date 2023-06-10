@@ -89,6 +89,14 @@ runs:
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       run: npm install -g @shopify/cli @shopify/theme
 
+    - name: Print out the current directory
+      shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        pwd
+        echo $GITHUB_ACTION_PATH
+
     - name: Setup git
       if: ${{ inputs.config-git-user == 'true' }}
       shell: bash
