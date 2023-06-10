@@ -108,6 +108,10 @@ runs:
       shell: bash
       run: |
         pwd
+        echo $INPUT_JSON-PATHS
+        echo $INPUT_MAIN-BRANCH
+        echo $INPUT_PRODUCTION-BRANCH
+        echo $INPUT_LIVE-MIRROR-BRANCH
         echo "INPUT_JSON-PATHS=${{ inputs.json-paths }}" >> "$GITHUB_OUTPUT"
         echo "INPUT_MAIN-BRANCH=${{ inputs.main-branch }}" >> "$GITHUB_OUTPUT"
         echo "INPUT_PRODUCTION-BRANCH=${{ inputs.production-branch }}" >> "$GITHUB_OUTPUT"
