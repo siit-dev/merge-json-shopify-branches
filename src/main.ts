@@ -54,6 +54,9 @@ async function run(): Promise<void> {
       core.getInput('run-locally-only', {required: false}) ||
       defaults.runLocallyOnly
 
+    // Get the project path from the PROJECT_PATH environment variable
+    const gitRoot = process.env.PROJECT_PATH
+
     // Create the formatter function if a command was provided
     let formatter = null
     if (formatterCommand && formatterCommand.length > 0) {
@@ -97,6 +100,7 @@ async function run(): Promise<void> {
     // Initialize the merger
     core.info('Initializing the GitMerger...')
     const merger = new GitMerger({
+      gitRoot,
       jsonPaths,
       mainBranch,
       productionBranch,
