@@ -7,7 +7,7 @@ import {expect, test} from '@jest/globals'
 test('test runs', () => {
   // json-paths
 
-  process.env['INPUT_RUN-LOCALLY-ONLY'] = 'true'
+  process.env['INPUT_RUN_LOCALLY_ONLY'] = 'true'
 
   const np = process.execPath
   const ip = path.join(__dirname, '..', 'lib', 'main.js')
