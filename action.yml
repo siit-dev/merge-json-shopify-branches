@@ -72,14 +72,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-
-    - uses: actions/setup-node@v3
-      with:
-        node-version: 18
-
     - uses: ruby/setup-ruby@v1
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       with:
@@ -92,47 +84,16 @@ runs:
       run: |
         gem install theme-check
 
-    - name: Get npm cache directory
-      id: npm-cache-dir
-      shell: bash
-      run: echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT
-
-    - name: Load NPM packages from cache
-      id: npm-cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          ${{ steps.npm-cache-dir.outputs.dir }}
-          **/node_modules
-        key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-${{ env.NODE_VERSION }}-
-          ${{ runner.os }}-node-
-
-    - name: Upgrade NPM to the correct version
-      shell: bash
-      env:
-        NPM_VERSION: ${{ env.NPM_VERSION }}
-      run: npm i -g npm@$NPM_VERSION
-
     - name: Install Shopify CLI
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       run: npm install -g @shopify/cli @shopify/theme
 
-    - name: Install node modules
-      shell: bash
-      if: steps.npm-cache.outputs.cache-hit != 'true'
-      run: npm install
-
     - name: Cleanup before the merge
       shell: bash
       run: |
-        git config user.name github-actions
-        git config user.email
-        git restore package-lock.json
-        rm -rf .husky
-        git status
+        git config --local user.name github-actions
+        git config --local user.email
 
     - name: Run the merge
       uses: ./subactions/merge

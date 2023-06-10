@@ -34,10 +34,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 18
-
       - uses: @smartimpact-it/merge-shopify-jsons@v1
 
 ```
