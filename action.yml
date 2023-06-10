@@ -50,9 +50,6 @@ inputs:
     default: 'true'
 
 outputs:
-  stdout:
-    description: 'The output of the merge process'
-    value: ${{ steps.merge-json.outputs.stdout }}
   hasConflict:
     description: 'Whether the merge process has conflicts'
     value: ${{ steps.merge-json.outputs.hasConflict }}
