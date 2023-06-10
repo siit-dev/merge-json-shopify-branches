@@ -66,6 +66,7 @@ async function run(): Promise<void> {
     process.stdout.on('data', mergerLogListener)
 
     // Initialize the merger
+    core.info('Initializing the GitMerger...')
     const merger = new GitMerger({
       createCommit: true,
       checkJsonValidity: checkJsonValidity === 'true',
@@ -77,6 +78,7 @@ async function run(): Promise<void> {
     })
 
     // Run the merge
+    core.info('Running the GitMerger...')
     const result: GitMergerResult = await merger.run()
 
     // Output the result
