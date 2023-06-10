@@ -5,7 +5,7 @@ import {execSync} from 'child_process'
 import * as fs from 'fs'
 
 const defaults = {
-  jsonPaths: 'config/*.json,locales/*.json,templates/**/*.json',
+  jsonPaths: 'config/*.json,locales/*.json,templates/*.json',
   mainBranch: 'main',
   productionBranch: 'production',
   liveMirrorBranch: 'live-mirror',
