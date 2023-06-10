@@ -125,6 +125,7 @@ runs:
         INPUT_EXIT_IF_NO_EXISTING_DEPLOYMENT: ${{ inputs.exit-if-no-existing-deployment }}
         INPUT_RUN_LOCALLY_ONLY: ${{ inputs.run-locally-only }}
         INPUT_CONFIG_GIT_USER: ${{ inputs.config-git-user }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}
       run: |
         pwd
         node dist/index.js

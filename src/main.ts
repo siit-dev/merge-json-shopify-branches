@@ -111,6 +111,7 @@ async function run(): Promise<void> {
     core.info(`preferred: ${preferred}`)
     core.info(`exitIfNoExistingDeployment: ${exitIfNoExistingDeployment}`)
     core.info(`runLocallyOnly: ${runLocallyOnly}`)
+    core.info(`verbose: ${verbose}`)
 
     // Initialize the merger
     core.info('Initializing the GitMerger...')
