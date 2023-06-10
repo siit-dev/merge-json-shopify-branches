@@ -111,22 +111,6 @@ runs:
         pwd
         node dist/index.js
 
-    - name: Run the merge
-      if: ${{ inputs.run-locally-only == 'true11' }}
-      uses: ./subactions/merge
-      id: merge-json
-      with:
-        json-paths: ${{ inputs.json-paths }}
-        main-branch: ${{ inputs.main-branch }}
-        production-branch: ${{ inputs.production-branch }}
-        live-mirror-branch: ${{ inputs.live-mirror-branch }}
-        check-json-validity: ${{ inputs.check-json-validity }}
-        formatter-command: ${{ inputs.formatter-command }}
-        commit-message: ${{ inputs.commit-message }}
-        preferred: ${{ inputs.preferred }}
-        exit-if-no-existing-deployment: ${{ inputs.exit-if-no-existing-deployment }}
-        run-locally-only: ${{ inputs.run-locally-only }}
-
     - name: See the git status
       shell: bash
       run: |
