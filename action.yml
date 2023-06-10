@@ -1,11 +1,152 @@
-name: 'Your name here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: Merge Shopify JSON files from 2 branches
+
+description: 'Merge Shopify JSON files from 2 branches'
+
+author: 'SmartImpact IT'
+
 inputs:
-  milliseconds: # change this
+  json-paths:
     required: true
-    description: 'input description here'
-    default: 'default value if applicable'
+    description: 'JSON paths to merge'
+    default: 'config/settings_data.json,locales/en.default.json,locales/en.json'
+  main-branch:
+    required: true
+    description: 'Main branch'
+    default: 'main'
+  production-branch:
+    required: true
+    description: 'Production branch'
+    default: 'production'
+  live-mirror-branch:
+    required: true
+    description: 'Live mirror branch'
+    default: 'live-mirror'
+  check-json-validity:
+    required: true
+    description: 'Check JSON validity'
+    default: 'true'
+  formatter-command:
+    required: true
+    description: 'Formatter'
+    default: 'prettier --write %s'
+  commit-message:
+    required: true
+    description: 'Commit message'
+    default: '[AUTOMATED] Update JSON files from `#liveMirror#` branch: #files#'
+  preferred:
+    required: true
+    description: 'Preferred merge strategy'
+    default: 'ours'
+  exit-if-no-existing-deployment:
+    required: true
+    description: 'Exit if no existing deployment'
+    default: 'true'
+  run-locally-only:
+    required: true
+    description: 'Run locally only'
+    default: 'false'
+
+outputs:
+  stdout:
+    description: 'The output of the merge process'
+    value: ${{ steps.merge-json.outputs.stdout }}
+  success:
+    description: 'Whether the merge process was successful'
+    value: ${{ success() }}
+
 runs:
-  using: 'node16'
-  main: 'dist/index.js'
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 18
+
+    - uses: ruby/setup-ruby@v1
+      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
+      with:
+        ruby-version: 3.2
+        bundler: 'latest'
+
+    - name: Install Ruby dependencies
+      shell: bash
+      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
+      run: |
+        gem install theme-check
+
+    - name: Get npm cache directory
+      id: npm-cache-dir
+      shell: bash
+      run: echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT
+
+    - name: Load NPM packages from cache
+      id: npm-cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ${{ steps.npm-cache-dir.outputs.dir }}
+          **/node_modules
+        key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-${{ env.NODE_VERSION }}-
+          ${{ runner.os }}-node-
+
+    - name: Upgrade NPM to the correct version
+      shell: bash
+      env:
+        NPM_VERSION: ${{ env.NPM_VERSION }}
+      run: npm i -g npm@$NPM_VERSION
+
+    - name: Install Shopify CLI
+      shell: bash
+      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
+      run: npm install -g @shopify/cli @shopify/theme
+
+    - name: Install node modules
+      shell: bash
+      if: steps.npm-cache.outputs.cache-hit != 'true'
+      run: npm install
+
+    - name: Cleanup before the merge
+      shell: bash
+      run: |
+        git config user.name github-actions
+        git config user.email
+        git restore package-lock.json
+        rm -rf .husky
+        git status
+
+    - name: Run the merge
+      uses: ./subactions/merge
+      id: merge-json
+      with:
+        json-paths: ${{ inputs.json-paths }}
+        main-branch: ${{ inputs.main-branch }}
+        production-branch: ${{ inputs.production-branch }}
+        live-mirror-branch: ${{ inputs.live-mirror-branch }}
+        check-json-validity: ${{ inputs.check-json-validity }}
+        formatter-command: ${{ inputs.formatter-command }}
+        commit-message: ${{ inputs.commit-message }}
+        preferred: ${{ inputs.preferred }}
+        exit-if-no-existing-deployment: ${{ inputs.exit-if-no-existing-deployment }}
+        run-locally-only: ${{ inputs.run-locally-only }}
+
+    - name: See the git status
+      shell: bash
+      run: |
+        git status
+
+    - name: Check JSON validity, if requested
+      shell: bash
+      if: ${{ success() && inputs.check-json-validity == 'true' }}
+      run: |
+        git status | grep 'Your branch is ahead' && shopify theme check -c json
+
+    - name: Push the changes, if there are any
+      shell: bash
+      if: success()
+      run: |
+        git status | grep 'Your branch is ahead' && git push && echo 'Pushed changes' || echo "No changes to push"
