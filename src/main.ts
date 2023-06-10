@@ -17,7 +17,8 @@ const defaults: Record<string, string> = {
   'commit-message': 'Merge JSON files',
   preferred: 'theirs',
   'exit-if-no-existing-deployment': 'false',
-  'run-locally-only': 'false'
+  'run-locally-only': 'false',
+  verbose: 'false'
 }
 
 const getInput = (name: string): string => {
@@ -66,6 +67,7 @@ async function run(): Promise<void> {
       'exit-if-no-existing-deployment'
     )
     const runLocallyOnly = getInput('run-locally-only')
+    const verbose = getInput('verbose')
 
     // Get the project path from current working directory
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()
@@ -125,7 +127,8 @@ async function run(): Promise<void> {
       commitMessage,
       exitIfNoExistingDeployment: exitIfNoExistingDeployment === 'true',
       runLocallyOnly: runLocallyOnly === 'true',
-      logger
+      logger,
+      verbose: verbose === 'true'
     })
 
     // Run the merge

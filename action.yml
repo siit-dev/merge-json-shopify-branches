@@ -48,6 +48,10 @@ inputs:
     required: false
     description: 'Configure git user'
     default: 'true'
+  verbose:
+    required: false
+    description: 'Verbose'
+    default: 'false'
 
 outputs:
   hasConflict:
