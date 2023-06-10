@@ -6,6 +6,8 @@ import * as fs from 'fs'
 
 async function run(): Promise<void> {
   try {
+    core.info('Starting the action...')
+
     const jsonPaths = core.getInput('json-paths', {required: true}).split(/,\n/)
     const mainBranch = core.getInput('main-branch', {required: true})
     const productionBranch = core.getInput('production-branch', {

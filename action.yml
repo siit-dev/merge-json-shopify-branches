@@ -8,7 +8,7 @@ inputs:
   json-paths:
     required: true
     description: 'JSON paths to merge'
-    default: 'config/settings_data.json,locales/en.default.json,locales/en.json'
+    default: 'config/*.json,locales/*.json,templates/**/*.json'
   main-branch:
     required: true
     description: 'Main branch'
@@ -26,9 +26,8 @@ inputs:
     description: 'Check JSON validity'
     default: 'true'
   formatter-command:
-    required: true
-    description: 'Formatter'
-    default: 'prettier --write %s'
+    required: false
+    description: 'Formatter command'
   commit-message:
     required: true
     description: 'Commit message'
