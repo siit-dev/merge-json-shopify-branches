@@ -1,6 +1,9 @@
 import * as core from '@actions/core'
 import {GitMerger} from '@smartimpact-it/json-merge-shopify'
-import {GitMergerResult} from '@smartimpact-it/json-merge-shopify/lib/git-integration/GitMerger'
+import {
+  GitMergerResult,
+  Logger
+} from '@smartimpact-it/json-merge-shopify/lib/git-integration/GitMerger'
 import {execSync} from 'child_process'
 import * as fs from 'fs'
 
@@ -25,6 +28,26 @@ const getInput = (name: string): string => {
     defaults[name.replace('-', '_')] ||
     ''
   return input
+}
+
+const logger: Logger = (
+  message: string | Error,
+  type: 'log' | 'warn' | 'error' | 'success'
+): void => {
+  switch (type) {
+    case 'log':
+      core.info(message.toString())
+      break
+    case 'warn':
+      core.warning(message)
+      break
+    case 'error':
+      core.error(message)
+      break
+    case 'success':
+      core.info(message.toString())
+      break
+  }
 }
 
 async function run(): Promise<void> {
@@ -101,7 +124,8 @@ async function run(): Promise<void> {
       formatter,
       commitMessage,
       exitIfNoExistingDeployment: exitIfNoExistingDeployment === 'true',
-      runLocallyOnly: runLocallyOnly === 'true'
+      runLocallyOnly: runLocallyOnly === 'true',
+      logger
     })
 
     // Run the merge
