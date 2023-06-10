@@ -12,7 +12,7 @@ const defaults: Record<string, string> = {
   'check-json-validity': 'true',
   'formatter-command': '',
   'commit-message': 'Merge JSON files',
-  preferred: 'ours',
+  preferred: 'theirs',
   'exit-if-no-existing-deployment': 'false',
   'run-locally-only': 'false'
 }
@@ -127,8 +127,10 @@ async function run(): Promise<void> {
     if (result.hasCommitted) {
       core.info('Committed the merged JSON files...')
     }
-    if (result.mergedFiles) {
+    if (result.mergedFiles && result.mergedFiles.length > 0) {
       core.info(`Merged the following files: ${result.mergedFiles}`)
+    } else {
+      core.info('No files were merged...')
     }
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message)
