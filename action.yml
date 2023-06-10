@@ -103,22 +103,8 @@ runs:
       run: |
         git config --local user.name github-actions
         git config --local user.email github-actions@github.com
-
-    - name: Set up ENV variables
-      shell: bash
-      run: |
-        pwd
-        echo 'INPUT_JSON_PATHS="${{ inputs.json-paths }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_MAIN_BRANCH="${{ inputs.main-branch }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_PRODUCTION_BRANCH="${{ inputs.production-branch }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_LIVE_MIRROR_BRANCH="${{ inputs.live-mirror-branch }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_CHECK_JSON_VALIDITY="${{ inputs.check-json-validity }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_FORMATTER_COMMAND="${{ inputs.formatter-command }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_COMMIT_MESSAGE="${{ inputs.commit-message }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_PREFERRED="${{ inputs.preferred }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_EXIT_IF_NO_EXISTING_DEPLOYMENT="${{ inputs.exit-if-no-existing-deployment }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_RUN_LOCALLY_ONLY="${{ inputs.run-locally-only }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_CONFIG_GIT_USER="${{ inputs.config-git-user }}"' >> "$GITHUB_OUTPUT"
+        git status
+        git log -1
 
     - name: Run the merge code
       id: merge-json
