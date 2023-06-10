@@ -55,7 +55,7 @@ async function run(): Promise<void> {
       defaults.runLocallyOnly
 
     // Get the project path from the PROJECT_PATH environment variable
-    const gitRoot = process.env.PROJECT_PATH
+    const gitRoot = process.env.GITHUB_PROJECT_PATH
 
     // Create the formatter function if a command was provided
     let formatter = null

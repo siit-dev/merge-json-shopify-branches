@@ -113,6 +113,7 @@ runs:
         PROJECT_PATH: ${{ vars.GITHUB_PATH }}
       run: |
         pwd
+        echo "(pwd)" >> $GITHUB_PROJECT_PATH
         node dist/index.js
 
     - name: See the git status
