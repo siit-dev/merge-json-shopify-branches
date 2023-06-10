@@ -55,7 +55,7 @@ async function run(): Promise<void> {
   try {
     core.info('Starting the action...')
 
-    const jsonPaths = getInput('json-paths').split(/,\n/)
+    const jsonPaths = getInput('json-paths').split(/[,\n]/)
     const mainBranch = getInput('main-branch')
     const productionBranch = getInput('production-branch')
     const liveMirrorBranch = getInput('live-mirror-branch')
