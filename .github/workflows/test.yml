@@ -31,5 +31,5 @@ jobs:
       - name: Run the action
         uses: ./
         with:
-          run-locally-only: true
+          run-locally-only: 'true'
           github-token: ${{ github.token }}

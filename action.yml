@@ -43,7 +43,7 @@ inputs:
   run-locally-only:
     required: false
     description: 'Run locally only'
-    default: 'false'
+    default: 'true'
   config-git-user:
     required: false
     description: 'Configure git user'
