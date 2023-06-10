@@ -112,7 +112,6 @@ runs:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
       run: |
         pwd
-        echo "(pwd)" >> $GITHUB_PROJECT_PATH
         node dist/index.js
 
     - name: See the git status
