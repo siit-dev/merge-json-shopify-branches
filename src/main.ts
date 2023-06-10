@@ -81,6 +81,12 @@ async function run(): Promise<void> {
     }
     process.stdout.on('data', mergerLogListener)
 
+    // Get the calling Git folder.
+    const gitFolder = execSync('git rev-parse --show-toplevel', {
+      encoding: 'utf8'
+    }).trim()
+    core.info(`Git folder: ${gitFolder}`)
+
     // Initialize the merger
     core.info('Initializing the GitMerger...')
     const merger = new GitMerger({
