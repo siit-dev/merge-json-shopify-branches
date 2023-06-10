@@ -72,12 +72,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v3
-      with:
-        repository: siit-dev/merge-json-shopify-branches
-        path: merge-json-shopify-branches
-        ref: releases/v1
-
     - uses: ruby/setup-ruby@v1
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       with:
@@ -103,7 +97,7 @@ runs:
         git config --local user.email github-actions@github.com
 
     - name: Run the merge
-      uses: ./subactions/merge
+      uses: ${{ vars.GITHUB_ACTION_PATH }}/subactions/merge
       id: merge-json
       with:
         json-paths: ${{ inputs.json-paths }}
