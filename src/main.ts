@@ -87,6 +87,19 @@ async function run(): Promise<void> {
     }).trim()
     core.info(`Git folder: ${gitFolder}`)
 
+    // Output the input parameters
+    core.info('Outputting the input parameters...')
+    core.info(`jsonPaths: ${jsonPaths.join(', ')}`)
+    core.info(`mainBranch: ${mainBranch}`)
+    core.info(`productionBranch: ${productionBranch}`)
+    core.info(`liveMirrorBranch: ${liveMirrorBranch}`)
+    core.info(`checkJsonValidity: ${checkJsonValidity}`)
+    core.info(`formatterCommand: ${formatterCommand}`)
+    core.info(`commitMessage: ${commitMessage}`)
+    core.info(`preferred: ${preferred}`)
+    core.info(`exitIfNoExistingDeployment: ${exitIfNoExistingDeployment}`)
+    core.info(`runLocallyOnly: ${runLocallyOnly}`)
+
     // Initialize the merger
     core.info('Initializing the GitMerger...')
     const merger = new GitMerger({
