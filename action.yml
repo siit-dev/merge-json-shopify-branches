@@ -89,12 +89,6 @@ runs:
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       run: npm install -g @shopify/cli @shopify/theme
 
-    - name: Cleanup before the merge
-      shell: bash
-      run: |
-        git config --local user.name github-actions
-        git config --local user.email
-
     - name: Run the merge
       uses: ./subactions/merge
       id: merge-json
