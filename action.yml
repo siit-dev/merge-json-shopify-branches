@@ -6,46 +6,46 @@ author: 'SmartImpact IT'
 
 inputs:
   json-paths:
-    required: true
+    required: false
     description: 'JSON paths to merge'
     default: 'config/*.json,locales/*.json,templates/**/*.json'
   main-branch:
-    required: true
+    required: false
     description: 'Main branch'
     default: 'main'
   production-branch:
-    required: true
+    required: false
     description: 'Production branch'
     default: 'production'
   live-mirror-branch:
-    required: true
+    required: false
     description: 'Live mirror branch'
     default: 'live-mirror'
   check-json-validity:
-    required: true
+    required: false
     description: 'Check JSON validity'
     default: 'true'
   formatter-command:
     required: false
     description: 'Formatter command'
   commit-message:
-    required: true
+    required: false
     description: 'Commit message'
     default: '[AUTOMATED] Update JSON files from `#liveMirror#` branch: #files#'
   preferred:
-    required: true
+    required: false
     description: 'Preferred merge strategy'
     default: 'ours'
   exit-if-no-existing-deployment:
-    required: true
+    required: false
     description: 'Exit if no existing deployment'
     default: 'true'
   run-locally-only:
-    required: true
+    required: false
     description: 'Run locally only'
     default: 'false'
   config-git-user:
-    required: true
+    required: false
     description: 'Configure git user'
     default: 'true'
 

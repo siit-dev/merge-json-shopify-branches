@@ -4,50 +4,74 @@ import {GitMergerResult} from '@smartimpact-it/json-merge-shopify/lib/git-integr
 import {execSync} from 'child_process'
 import * as fs from 'fs'
 
+const defaults = {
+  jsonPaths: 'config/*.json,locales/*.json,templates/**/*.json',
+  mainBranch: 'main',
+  productionBranch: 'production',
+  liveMirrorBranch: 'live-mirror',
+  checkJsonValidity: 'true',
+  formatterCommand: '',
+  commitMessage: 'Merge JSON files',
+  preferred: 'ours',
+  exitIfNoExistingDeployment: 'false',
+  runLocallyOnly: 'false'
+}
+
 async function run(): Promise<void> {
   try {
     core.info('Starting the action...')
 
-    const jsonPaths = core.getInput('json-paths', {required: true}).split(/,\n/)
-    const mainBranch = core.getInput('main-branch', {required: true})
-    const productionBranch = core.getInput('production-branch', {
-      required: true
-    })
-    const liveMirrorBranch = core.getInput('live-mirror-branch', {
-      required: true
-    })
-    const checkJsonValidity = core.getInput('check-json-validity', {
-      required: true
-    })
-    const formatterCommand = core.getInput('formatter-command', {
-      required: false
-    })
-    const commitMessage = core.getInput('commit-message', {required: true})
-    const preferred = core.getInput('preferred', {required: true})
-    const exitIfNoExistingDeployment = core.getInput(
-      'exit-if-no-existing-deployment',
-      {required: true}
-    )
-    const runLocallyOnly = core.getInput('run-locally-only', {required: true})
+    const jsonPaths = (
+      core.getInput('json-paths', {required: false}) || defaults.jsonPaths
+    ).split(/,\n/)
+    const mainBranch =
+      core.getInput('main-branch', {required: false}) || defaults.mainBranch
+    const productionBranch =
+      core.getInput('production-branch', {
+        required: false
+      }) || defaults.productionBranch
+    const liveMirrorBranch =
+      core.getInput('live-mirror-branch', {
+        required: false
+      }) || defaults.liveMirrorBranch
+    const checkJsonValidity =
+      core.getInput('check-json-validity', {
+        required: false
+      }) || defaults.checkJsonValidity
+    const formatterCommand =
+      core.getInput('formatter-command', {
+        required: false
+      }) || defaults.formatterCommand
+    const commitMessage =
+      core.getInput('commit-message', {required: false}) ||
+      defaults.commitMessage
+    const preferred =
+      core.getInput('preferred', {required: false}) || defaults.preferred
+    const exitIfNoExistingDeployment =
+      core.getInput('exit-if-no-existing-deployment', {required: false}) ||
+      defaults.exitIfNoExistingDeployment
+    const runLocallyOnly =
+      core.getInput('run-locally-only', {required: false}) ||
+      defaults.runLocallyOnly
 
     // Create the formatter function if a command was provided
-    // let formatter = null
-    // if (formatterCommand && formatterCommand.length > 0) {
-    //   core.info('Creating the formatter function...')
-    //   formatter = (json: string): string => {
-    //     const tempPath = fs.mkdtempSync('json-merge-shopify')
-    //     const tempFile = `${tempPath}/temp.json`
-    //     fs.writeFileSync(tempFile, json)
-    //     const command = formatterCommand.indexOf('%s')
-    //       ? formatterCommand.replace('%s', tempFile)
-    //       : `${formatterCommand} ${tempFile}`
-    //     const formatted = execSync(command, {
-    //       encoding: 'utf8'
-    //     })
-    //     fs.unlinkSync(tempFile)
-    //     return formatted
-    //   }
-    // }
+    let formatter = null
+    if (formatterCommand && formatterCommand.length > 0) {
+      core.info('Creating the formatter function...')
+      formatter = (json: string): string => {
+        const tempPath = fs.mkdtempSync('json-merge-shopify')
+        const tempFile = `${tempPath}/temp.json`
+        fs.writeFileSync(tempFile, json)
+        const command = formatterCommand.indexOf('%s')
+          ? formatterCommand.replace('%s', tempFile)
+          : `${formatterCommand} ${tempFile}`
+        const formatted = execSync(command, {
+          encoding: 'utf8'
+        })
+        fs.unlinkSync(tempFile)
+        return formatted
+      }
+    }
 
     // Catch the console.log output from the merger
     core.info('Catching the GitMerger output...')
@@ -60,10 +84,14 @@ async function run(): Promise<void> {
     // Initialize the merger
     core.info('Initializing the GitMerger...')
     const merger = new GitMerger({
+      jsonPaths,
+      mainBranch,
+      productionBranch,
+      liveMirrorBranch,
       createCommit: true,
       checkJsonValidity: checkJsonValidity === 'true',
       preferred: preferred as 'ours' | 'theirs',
-      // formatter,
+      formatter,
       commitMessage,
       exitIfNoExistingDeployment: exitIfNoExistingDeployment === 'true',
       runLocallyOnly: runLocallyOnly === 'true'
