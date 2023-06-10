@@ -110,7 +110,6 @@ runs:
       shell: bash
       env:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
-        PROJECT_PATH: ${{ vars.GITHUB_PATH }}
       run: |
         pwd
         echo "(pwd)" >> $GITHUB_PROJECT_PATH
