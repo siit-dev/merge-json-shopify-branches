@@ -30,36 +30,24 @@ async function run(): Promise<void> {
     )
     const runLocallyOnly = core.getInput('run-locally-only', {required: true})
 
-    // Print out the inputs to the action
-    core.info(`json-paths: ${jsonPaths}`)
-    core.info(`main-branch: ${mainBranch}`)
-    core.info(`production-branch: ${productionBranch}`)
-    core.info(`live-mirror-branch: ${liveMirrorBranch}`)
-    core.info(`check-json-validity: ${checkJsonValidity}`)
-    core.info(`formatter-command: ${formatterCommand}`)
-    core.info(`commit-message: ${commitMessage}`)
-    core.info(`preferred: ${preferred}`)
-    core.info(`exit-if-no-existing-deployment: ${exitIfNoExistingDeployment}`)
-    core.info(`run-locally-only: ${runLocallyOnly}`)
-
     // Create the formatter function if a command was provided
-    let formatter = null
-    if (formatterCommand && formatterCommand.length > 0) {
-      core.info('Creating the formatter function...')
-      formatter = (json: string): string => {
-        const tempPath = fs.mkdtempSync('json-merge-shopify')
-        const tempFile = `${tempPath}/temp.json`
-        fs.writeFileSync(tempFile, json)
-        const command = formatterCommand.indexOf('%s')
-          ? formatterCommand.replace('%s', tempFile)
-          : `${formatterCommand} ${tempFile}`
-        const formatted = execSync(command, {
-          encoding: 'utf8'
-        })
-        fs.unlinkSync(tempFile)
-        return formatted
-      }
-    }
+    // let formatter = null
+    // if (formatterCommand && formatterCommand.length > 0) {
+    //   core.info('Creating the formatter function...')
+    //   formatter = (json: string): string => {
+    //     const tempPath = fs.mkdtempSync('json-merge-shopify')
+    //     const tempFile = `${tempPath}/temp.json`
+    //     fs.writeFileSync(tempFile, json)
+    //     const command = formatterCommand.indexOf('%s')
+    //       ? formatterCommand.replace('%s', tempFile)
+    //       : `${formatterCommand} ${tempFile}`
+    //     const formatted = execSync(command, {
+    //       encoding: 'utf8'
+    //     })
+    //     fs.unlinkSync(tempFile)
+    //     return formatted
+    //   }
+    // }
 
     // Catch the console.log output from the merger
     core.info('Catching the GitMerger output...')
@@ -75,7 +63,7 @@ async function run(): Promise<void> {
       createCommit: true,
       checkJsonValidity: checkJsonValidity === 'true',
       preferred: preferred as 'ours' | 'theirs',
-      formatter,
+      // formatter,
       commitMessage,
       exitIfNoExistingDeployment: exitIfNoExistingDeployment === 'true',
       runLocallyOnly: runLocallyOnly === 'true'
