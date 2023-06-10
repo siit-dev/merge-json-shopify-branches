@@ -5,10 +5,8 @@ import {expect, test} from '@jest/globals'
 
 // shows how the runner will run a javascript action with env / stdout protocol
 test('test runs', () => {
-  // json-paths
-
+  // Set the environment variables to run the action locally.
   process.env['INPUT_RUN_LOCALLY_ONLY'] = 'true'
-
   const np = process.execPath
   const ip = path.join(__dirname, '..', 'lib', 'main.js')
   const options: cp.ExecFileSyncOptions = {
