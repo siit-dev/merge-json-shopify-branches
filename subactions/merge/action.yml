@@ -21,7 +21,7 @@ inputs:
   formatter-command:
     required: false
     description: 'Formatter'
-    default: ''
+    default: 'prettier --write'
   commit-message:
     required: false
     description: 'Commit message'
