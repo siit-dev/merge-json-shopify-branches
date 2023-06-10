@@ -45,6 +45,10 @@ inputs:
     required: true
     description: 'Run locally only'
     default: 'false'
+  config-git-user:
+    required: true
+    description: 'Configure git user'
+    default: 'true'
 
 outputs:
   stdout:
@@ -88,6 +92,13 @@ runs:
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       run: npm install -g @shopify/cli @shopify/theme
+
+    - name: Setup git
+      if: ${{ inputs.config-git-user == 'true' }}
+      shell: bash
+      run: |
+        git config --local user.name github-actions
+        git config --local user.email github-actions@github.com
 
     - name: Run the merge
       uses: ./subactions/merge
