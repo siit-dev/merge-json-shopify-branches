@@ -119,7 +119,7 @@ runs:
         echo "INPUT_EXIT-IF-NO-EXISTING-DEPLOYMENT=${{ inputs.exit-if-no-existing-deployment }}" >> "$GITHUB_OUTPUT"
         echo "INPUT_RUN-LOCALLY-ONLY=${{ inputs.run-locally-only }}" >> "$GITHUB_OUTPUT"
         echo "INPUT_CONFIG-GIT-USER=${{ inputs.config-git-user }}" >> "$GITHUB_OUTPUT"
-        echo "GITHUB_GIT_ROOT=${{ vars.GITHUB_PATH }}" >> "$GITHUB_OUTPUT"
+        echo "GITHUB_GIT_ROOT=${{ env.GITHUB_PATH }}" >> "$GITHUB_OUTPUT"
 
     - name: Run the merge code
       id: merge-json
