@@ -117,16 +117,43 @@ runs:
         echo 'INPUT_COMMIT_MESSAGE="${{ inputs.commit-message }}"' >> "$GITHUB_OUTPUT"
         echo 'INPUT_PREFERRED="${{ inputs.preferred }}"' >> "$GITHUB_OUTPUT"
         echo 'INPUT_EXIT_IF_NO_EXISTING_DEPLOYMENT="${{ inputs.exit-if-no-existing-deployment }}"' >> "$GITHUB_OUTPUT"
-        echo 'INPUT_RUN-LOCALLY_ONLY="${{ inputs.run-locally-only }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_RUN_LOCALLY_ONLY="${{ inputs.run-locally-only }}"' >> "$GITHUB_OUTPUT"
         echo 'INPUT_CONFIG_GIT_USER="${{ inputs.config-git-user }}"' >> "$GITHUB_OUTPUT"
 
     - name: Run the merge code
       id: merge-json
       working-directory: ${{ github.action_path }}
       shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        INPUT_JSON_PATHS: ${{ inputs.json-paths }}
+        INPUT_MAIN_BRANCH: ${{ inputs.main-branch }}
+        INPUT_PRODUCTION_BRANCH: ${{ inputs.production-branch }}
+        INPUT_LIVE_MIRROR_BRANCH: ${{ inputs.live-mirror-branch }}
+        INPUT_CHECK_JSON_VALIDITY: ${{ inputs.check-json-validity }}
+        INPUT_FORMATTER_COMMAND: ${{ inputs.formatter-command }}
+        INPUT_COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        INPUT_PREFERRED: ${{ inputs.preferred }}
+        INPUT_EXIT_IF_NO_EXISTING_DEPLOYMENT: ${{ inputs.exit-if-no-existing-deployment }}
+        INPUT_RUN_LOCALLY_ONLY: ${{ inputs.run-locally-only }}
+        INPUT_CONFIG_GIT_USER: ${{ inputs.config-git-user }}
       run: |
         pwd
         node dist/index.js
+
+    - uses: $GITHUB_ACTION_PATH/subactions/merge
+      id: merge-json2
+      with:
+        json-paths: ${{ inputs.json-paths }}
+        main-branch: ${{ inputs.main-branch }}
+        production-branch: ${{ inputs.production-branch }}
+        live-mirror-branch: ${{ inputs.live-mirror-branch }}
+        check-json-validity: ${{ inputs.check-json-validity }}
+        formatter-command: ${{ inputs.formatter-command }}
+        commit-message: ${{ inputs.commit-message }}
+        preferred: ${{ inputs.preferred }}
+        exit-if-no-existing-deployment: ${{ inputs.exit-if-no-existing-deployment }}
+        run-locally-only: ${{ inputs.run-locally-only }}
 
     - name: See the git status
       shell: bash
