@@ -20,7 +20,7 @@ async function run(): Promise<void> {
       required: true
     })
     const formatterCommand = core.getInput('formatter-command', {
-      required: true
+      required: false
     })
     const commitMessage = core.getInput('commit-message', {required: true})
     const preferred = core.getInput('preferred', {required: true})

@@ -26,9 +26,8 @@ inputs:
     description: 'Check JSON validity'
     default: 'true'
   formatter-command:
-    required: true
+    required: false
     description: 'Formatter command'
-    default: 'prettier --write'
   commit-message:
     required: true
     description: 'Commit message'
