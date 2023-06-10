@@ -117,9 +117,18 @@ async function run(): Promise<void> {
     core.setOutput('log', mergerLog.join('\n'))
 
     if (result.hasConflict) {
+      core.error('Conflict merging JSON files...')
       core.setFailed('Conflict merging JSON files')
-    } else if (result.hasErrors) {
+    }
+    if (result.hasErrors) {
+      core.error(result.error || 'Error merging JSON files...')
       core.setFailed(result.error || 'Error merging JSON files')
+    }
+    if (result.hasCommitted) {
+      core.info('Committed the merged JSON files...')
+    }
+    if (result.mergedFiles) {
+      core.info(`Merged the following files: ${result.mergedFiles}`)
     }
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message)

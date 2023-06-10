@@ -125,6 +125,11 @@ runs:
         pwd
         node dist/index.js
 
+    - name: Output the log
+      shell: bash
+      run: |
+        echo "${{ steps.merge-json.outputs.log }}"
+
     - name: See the git status
       shell: bash
       run: |
