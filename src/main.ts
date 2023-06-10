@@ -47,8 +47,6 @@ async function run(): Promise<void> {
     // Get the project path from current working directory
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()
 
-    core.info(JSON.stringify(process.env))
-
     // Create the formatter function if a command was provided
     let formatter = null
     if (formatterCommand && formatterCommand.length > 0) {

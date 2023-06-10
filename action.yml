@@ -103,8 +103,6 @@ runs:
       run: |
         git config --local user.name github-actions
         git config --local user.email github-actions@github.com
-        git status
-        git log -1
 
     - name: Run the merge code
       id: merge-json
