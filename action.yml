@@ -73,6 +73,9 @@ runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v3
+      with:
+        repository: siit-dev/merge-json-shopify-branches
+        path: merge-json-shopify-branches
 
     - uses: ruby/setup-ruby@v1
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
