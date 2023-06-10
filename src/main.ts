@@ -43,6 +43,7 @@ async function run(): Promise<void> {
     // Create the formatter function if a command was provided
     let formatter = null
     if (formatterCommand) {
+      core.info('Creating the formatter function...')
       formatter = (json: string): string => {
         const tempPath = fs.mkdtempSync('json-merge-shopify')
         const tempFile = `${tempPath}/temp.json`
@@ -59,6 +60,7 @@ async function run(): Promise<void> {
     }
 
     // Catch the console.log output from the merger
+    core.info('Catching the GitMerger output...')
     const mergerLog: string[] = []
     const mergerLogListener = (data: string): void => {
       mergerLog.push(data)
