@@ -76,6 +76,7 @@ runs:
       with:
         repository: siit-dev/merge-json-shopify-branches
         path: merge-json-shopify-branches
+        branch: release/v1
 
     - uses: ruby/setup-ruby@v1
       if: ${{ inputs.check-json-validity == 'true' == 'false' }}
