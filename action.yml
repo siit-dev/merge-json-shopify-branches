@@ -97,7 +97,8 @@ runs:
         git config --local user.email github-actions@github.com
 
     - name: Run the merge
-      uses: ${{ vars.GITHUB_ACTION_PATH }}/subactions/merge
+      working-directory: ${{ vars.GITHUB_ACTION_PATH }}
+      uses: ./subactions/merge
       id: merge-json
       with:
         json-paths: ${{ inputs.json-paths }}
