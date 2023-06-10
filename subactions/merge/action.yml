@@ -1,0 +1,63 @@
+name: 'Run the merge-json action'
+
+description: 'Run the merge-json action using GitMerger'
+
+inputs:
+  json-paths:
+    required: true
+    description: 'JSON paths to merge'
+    default: 'config/settings_data.json,locales/en.default.json,locales/en.json'
+  main-branch:
+    required: true
+    description: 'Main branch'
+    default: 'main'
+  production-branch:
+    required: true
+    description: 'Production branch'
+    default: 'production'
+  live-mirror-branch:
+    required: true
+    description: 'Live mirror branch'
+    default: 'live-mirror'
+  check-json-validity:
+    required: true
+    description: 'Check JSON validity'
+    default: 'true'
+  formatter-command:
+    required: true
+    description: 'Formatter'
+    default: 'prettier --write %s'
+  commit-message:
+    required: true
+    description: 'Commit message'
+    default: '[AUTOMATED] Update JSON files from `#liveMirror#` branch: #files#'
+  preferred:
+    required: true
+    description: 'Preferred merge strategy'
+    default: 'ours'
+  exit-if-no-existing-deployment:
+    required: true
+    description: 'Exit if no existing deployment'
+    default: 'true'
+  run-locally-only:
+    required: true
+    description: 'Run locally only'
+    default: 'false'
+
+outputs:
+  hasConflict:
+    description: 'Whether the merge process has conflicts'
+  hasErrors:
+    description: 'Whether the merge process has errors'
+  error:
+    description: 'The error message'
+  hasCommitted:
+    description: 'Whether the merge process has committed'
+  mergedFiles:
+    description: 'The merged files'
+  log:
+    description: 'The output of the merge process'
+
+runs:
+  using: 'node16'
+  main: 'dist/index.js'
