@@ -4,55 +4,45 @@ import {GitMergerResult} from '@smartimpact-it/json-merge-shopify/lib/git-integr
 import {execSync} from 'child_process'
 import * as fs from 'fs'
 
-const defaults = {
-  jsonPaths: 'config/*.json,locales/*.json,templates/*.json',
-  mainBranch: 'main',
-  productionBranch: 'production',
-  liveMirrorBranch: 'live-mirror',
-  checkJsonValidity: 'true',
-  formatterCommand: '',
-  commitMessage: 'Merge JSON files',
+const defaults: Record<string, string> = {
+  'json-paths': 'config/*.json,locales/*.json,templates/*.json',
+  'main-branch': 'main',
+  'production-branch': 'production',
+  'live-mirror-branch': 'live-mirror',
+  'check-json-validity': 'true',
+  'formatter-command': '',
+  'commit-message': 'Merge JSON files',
   preferred: 'ours',
-  exitIfNoExistingDeployment: 'false',
-  runLocallyOnly: 'false'
+  'exit-if-no-existing-deployment': 'false',
+  'run-locally-only': 'false'
+}
+
+const getInput = (name: string): string => {
+  const input =
+    core.getInput(name, {required: false}) ||
+    core.getInput(name.replace('-', '_'), {required: false}) ||
+    defaults[name] ||
+    defaults[name.replace('-', '_')] ||
+    ''
+  return input
 }
 
 async function run(): Promise<void> {
   try {
     core.info('Starting the action...')
 
-    const jsonPaths = (
-      core.getInput('json-paths', {required: false}) || defaults.jsonPaths
-    ).split(/,\n/)
-    const mainBranch =
-      core.getInput('main-branch', {required: false}) || defaults.mainBranch
-    const productionBranch =
-      core.getInput('production-branch', {
-        required: false
-      }) || defaults.productionBranch
-    const liveMirrorBranch =
-      core.getInput('live-mirror-branch', {
-        required: false
-      }) || defaults.liveMirrorBranch
-    const checkJsonValidity =
-      core.getInput('check-json-validity', {
-        required: false
-      }) || defaults.checkJsonValidity
-    const formatterCommand =
-      core.getInput('formatter-command', {
-        required: false
-      }) || defaults.formatterCommand
-    const commitMessage =
-      core.getInput('commit-message', {required: false}) ||
-      defaults.commitMessage
-    const preferred =
-      core.getInput('preferred', {required: false}) || defaults.preferred
-    const exitIfNoExistingDeployment =
-      core.getInput('exit-if-no-existing-deployment', {required: false}) ||
-      defaults.exitIfNoExistingDeployment
-    const runLocallyOnly =
-      core.getInput('run-locally-only', {required: false}) ||
-      defaults.runLocallyOnly
+    const jsonPaths = getInput('json-paths').split(/,\n/)
+    const mainBranch = getInput('main-branch')
+    const productionBranch = getInput('production-branch')
+    const liveMirrorBranch = getInput('live-mirror-branch')
+    const checkJsonValidity = getInput('check-json-validity')
+    const formatterCommand = getInput('formatter-command')
+    const commitMessage = getInput('commit-message')
+    const preferred = getInput('preferred')
+    const exitIfNoExistingDeployment = getInput(
+      'exit-if-no-existing-deployment'
+    )
+    const runLocallyOnly = getInput('run-locally-only')
 
     // Get the project path from current working directory
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()

@@ -108,21 +108,17 @@ runs:
       shell: bash
       run: |
         pwd
-        echo $INPUT_JSON-PATHS
-        echo $INPUT_MAIN-BRANCH
-        echo $INPUT_PRODUCTION-BRANCH
-        echo $INPUT_LIVE-MIRROR-BRANCH
-        echo "INPUT_JSON-PATHS=${{ inputs.json-paths }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_MAIN-BRANCH=${{ inputs.main-branch }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_PRODUCTION-BRANCH=${{ inputs.production-branch }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_LIVE-MIRROR-BRANCH=${{ inputs.live-mirror-branch }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_CHECK-JSON-VALIDITY=${{ inputs.check-json-validity }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_FORMATTER-COMMAND=${{ inputs.formatter-command }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_COMMIT-MESSAGE=${{ inputs.commit-message }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_PREFERRED=${{ inputs.preferred }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_EXIT-IF-NO-EXISTING-DEPLOYMENT=${{ inputs.exit-if-no-existing-deployment }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_RUN-LOCALLY-ONLY=${{ inputs.run-locally-only }}" >> "$GITHUB_OUTPUT"
-        echo "INPUT_CONFIG-GIT-USER=${{ inputs.config-git-user }}" >> "$GITHUB_OUTPUT"
+        echo 'INPUT_JSON_PATHS="${{ inputs.json-paths }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_MAIN_BRANCH="${{ inputs.main-branch }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_PRODUCTION_BRANCH="${{ inputs.production-branch }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_LIVE_MIRROR_BRANCH="${{ inputs.live-mirror-branch }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_CHECK_JSON_VALIDITY="${{ inputs.check-json-validity }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_FORMATTER_COMMAND="${{ inputs.formatter-command }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_COMMIT_MESSAGE="${{ inputs.commit-message }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_PREFERRED="${{ inputs.preferred }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_EXIT_IF_NO_EXISTING_DEPLOYMENT="${{ inputs.exit-if-no-existing-deployment }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_RUN-LOCALLY_ONLY="${{ inputs.run-locally-only }}"' >> "$GITHUB_OUTPUT"
+        echo 'INPUT_CONFIG_GIT_USER="${{ inputs.config-git-user }}"' >> "$GITHUB_OUTPUT"
 
     - name: Run the merge code
       id: merge-json
