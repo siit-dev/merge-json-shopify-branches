@@ -44,7 +44,7 @@ async function run(): Promise<void> {
 
     // Create the formatter function if a command was provided
     let formatter = null
-    if (formatterCommand) {
+    if (formatterCommand && formatterCommand.length > 0) {
       core.info('Creating the formatter function...')
       formatter = (json: string): string => {
         const tempPath = fs.mkdtempSync('json-merge-shopify')

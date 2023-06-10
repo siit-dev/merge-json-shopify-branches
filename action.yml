@@ -28,6 +28,7 @@ inputs:
   formatter-command:
     required: false
     description: 'Formatter command'
+    default: ''
   commit-message:
     required: true
     description: 'Commit message'
