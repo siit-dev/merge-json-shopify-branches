@@ -50,9 +50,24 @@ outputs:
   stdout:
     description: 'The output of the merge process'
     value: ${{ steps.merge-json.outputs.stdout }}
-  success:
-    description: 'Whether the merge process was successful'
-    value: ${{ success() }}
+  hasConflict:
+    description: 'Whether the merge process has conflicts'
+    value: ${{ steps.merge-json.outputs.hasConflict }}
+  hasErrors:
+    description: 'Whether the merge process has errors'
+    value: ${{ steps.merge-json.outputs.hasErrors }}
+  error:
+    description: 'The error message'
+    value: ${{ steps.merge-json.outputs.error }}
+  hasCommitted:
+    description: 'Whether the merge process has committed'
+    value: ${{ steps.merge-json.outputs.hasCommitted }}
+  mergedFiles:
+    description: 'The merged files'
+    value: ${{ steps.merge-json.outputs.mergedFiles }}
+  log:
+    description: 'The output of the merge process'
+    value: ${{ steps.merge-json.outputs.log }}
 
 runs:
   using: 'composite'
