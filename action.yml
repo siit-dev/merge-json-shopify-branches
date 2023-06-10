@@ -44,7 +44,7 @@ inputs:
   run-locally-only:
     required: true
     description: 'Run locally only'
-    default: 'false'
+    default: 'true'
 
 outputs:
   stdout:
