@@ -52,6 +52,9 @@ inputs:
     required: false
     description: 'Verbose'
     default: 'false'
+  config-file:
+    required: false
+    description: 'Config file'
 
 outputs:
   hasConflict:
@@ -114,6 +117,8 @@ runs:
       shell: bash
       env:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
+        # Set the INPUT_ variables to the values of the action.yml inputs. These are not available in composite actions, so we have to pass them in manually.
+        # https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions#example-specifying-inputs
         INPUT_JSON_PATHS: ${{ inputs.json-paths }}
         INPUT_MAIN_BRANCH: ${{ inputs.main-branch }}
         INPUT_PRODUCTION_BRANCH: ${{ inputs.production-branch }}
@@ -126,6 +131,7 @@ runs:
         INPUT_RUN_LOCALLY_ONLY: ${{ inputs.run-locally-only }}
         INPUT_CONFIG_GIT_USER: ${{ inputs.config-git-user }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
+        INPUT_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         pwd
         node dist/index.js

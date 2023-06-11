@@ -1,9 +1,10 @@
 import * as core from '@actions/core'
-import {GitMerger} from '@smartimpact-it/json-merge-shopify'
 import {
+  GitMerger,
+  GitMergerOptions,
   GitMergerResult,
   Logger
-} from '@smartimpact-it/json-merge-shopify/lib/git-integration/GitMerger'
+} from '@smartimpact-it/json-merge-shopify'
 import {execSync} from 'child_process'
 import * as fs from 'fs'
 
@@ -55,7 +56,9 @@ async function run(): Promise<void> {
   try {
     core.info('Starting the action...')
 
-    const jsonPaths = getInput('json-paths').split(/[,\n]/)
+    const jsonPaths = getInput('json-paths')
+      .split(/[,\n]/)
+      .map(path => path.trim())
     const mainBranch = getInput('main-branch')
     const productionBranch = getInput('production-branch')
     const liveMirrorBranch = getInput('live-mirror-branch')
@@ -68,6 +71,7 @@ async function run(): Promise<void> {
     )
     const runLocallyOnly = getInput('run-locally-only')
     const verbose = getInput('verbose')
+    const configFile = getInput('config-file')
 
     // Get the project path from current working directory
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()
@@ -100,7 +104,7 @@ async function run(): Promise<void> {
     process.stdout.on('data', mergerLogListener)
 
     // Output the input parameters
-    core.info('Outputting the input parameters...')
+    core.warning('Outputting the input parameters...')
     core.info(`jsonPaths: ${jsonPaths.join(', ')}`)
     core.info(`mainBranch: ${mainBranch}`)
     core.info(`productionBranch: ${productionBranch}`)
@@ -112,10 +116,10 @@ async function run(): Promise<void> {
     core.info(`exitIfNoExistingDeployment: ${exitIfNoExistingDeployment}`)
     core.info(`runLocallyOnly: ${runLocallyOnly}`)
     core.info(`verbose: ${verbose}`)
+    core.info(`configFile: ${configFile}`)
+    core.info(`gitRoot: ${gitRoot}`)
 
-    // Initialize the merger
-    core.info('Initializing the GitMerger...')
-    const merger = new GitMerger({
+    const mergerOptions: GitMergerOptions = {
       gitRoot,
       jsonPaths,
       mainBranch,
@@ -130,7 +134,17 @@ async function run(): Promise<void> {
       runLocallyOnly: runLocallyOnly === 'true',
       logger,
       verbose: verbose === 'true'
-    })
+    }
+
+    // Initialize the merger
+    core.info('\nInitializing the GitMerger...')
+    let merger: GitMerger
+    if (configFile && typeof configFile === 'string' && configFile.length > 0) {
+      merger = new GitMerger(configFile, mergerOptions)
+    } else {
+      // If no config file was provided, let GitMerger try to find one.
+      merger = new GitMerger(null, mergerOptions)
+    }
 
     // Run the merge
     core.info('Running the GitMerger...')
