@@ -84,20 +84,20 @@ runs:
   using: 'composite'
   steps:
     - uses: ruby/setup-ruby@v1
-      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
+      if: ${{ inputs.check-json-validity == 'true' }}
       with:
         ruby-version: 3.2
         bundler: 'latest'
 
     - name: Install Ruby dependencies
       shell: bash
-      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
+      if: ${{ inputs.check-json-validity == 'true' }}
       run: |
         gem install theme-check
 
     - name: Install Shopify CLI
       shell: bash
-      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
+      if: ${{ inputs.check-json-validity == 'true' }}
       run: npm install -g @shopify/cli @shopify/theme
 
     - name: Print out the current directory
