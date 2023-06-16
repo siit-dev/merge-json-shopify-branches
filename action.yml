@@ -32,6 +32,10 @@ inputs:
     required: false
     description: 'Commit message'
     default: '[AUTOMATED] Update JSON files from `#liveMirror#` branch: #files#'
+  push-after-commit:
+    required: false
+    description: 'Push after commit'
+    default: 'true'
   preferred:
     required: false
     description: 'Preferred merge strategy'
@@ -154,6 +158,6 @@ runs:
 
     - name: Push the changes, if there are any
       shell: bash
-      if: steps.merge-json.outputs.hasCommitted == 'true'
+      if: ${{ inputs.push-after-commit == 'true' && steps.merge-json.outputs.hasCommitted == 'true' }}
       run: |
         git status | grep 'Your branch is ahead' && git push && echo 'Pushed changes' || echo "No changes to push"
