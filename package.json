@@ -30,15 +30,15 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^1.10.0",
-    "@shopify/cli": "^3.46.3",
-    "@shopify/theme": "^3.46.3",
-    "@smartimpact-it/json-merge-shopify": "^1.0.19"
+    "@shopify/cli": "^3.46.5",
+    "@shopify/theme": "^3.46.5",
+    "@smartimpact-it/json-merge-shopify": "^1.0.22"
   },
   "devDependencies": {
-    "@types/node": "^20.2.6",
-    "@typescript-eslint/parser": "^5.59.9",
+    "@types/node": "^20.3.1",
+    "@typescript-eslint/parser": "^5.59.11",
     "@vercel/ncc": "^0.36.1",
-    "eslint": "^8.42.0",
+    "eslint": "^8.43.0",
     "eslint-plugin-github": "^4.8.0",
     "eslint-plugin-jest": "^27.2.1",
     "jest": "^29.5.0",
