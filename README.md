@@ -75,3 +75,21 @@ jobs:
           branch: main
           unprotect_reviews: true
 ```
+
+## Parameters
+
+| Parameter                        | Description                    | Default                                                                                                                                                      |
+| -------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `json-paths`                     | JSON paths to merge            | `config/*.json,locales/*.json,templates/**/*.json`                                                                                                           |
+| `main-branch`                    | Main branch                    | `main`                                                                                                                                                       |
+| `production-branch`              | Production branch              | `production`                                                                                                                                                 |
+| `live-mirror-branch`             | Live mirror branch             | `live-mirror`                                                                                                                                                |
+| `check-json-validity`            | Check JSON validity            | `true`                                                                                                                                                       |
+| `formatter-command`              | Formatter command              | Leave blank to use Prettier                                                                                                                                  |
+| `commit-message`                 | Commit message                 | ` [AUTOMATED] Update JSON files from ``#liveMirror#`` branch: #files# `                                                                                      |
+| `push-after-commit`              | Push after commit              | `true`                                                                                                                                                       |
+| `preferred`                      | Preferred merge strategy       | `theirs`                                                                                                                                                     |
+| `exit-if-no-existing-deployment` | Exit if no existing deployment | `true`                                                                                                                                                       |
+| `config-git-user`                | Configure git user             | `true`                                                                                                                                                       |
+| `verbose`                        | Verbose                        | `false`                                                                                                                                                      |
+| `config-file`                    | Config file                    | The path to a config file that will be used to load the settings. See [json-merge-shopify](https://www.npmjs.com/package/@smartimpact-it/json-merge-shopify) |
