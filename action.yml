@@ -144,12 +144,6 @@ runs:
       run: |
         git status
 
-    - name: Check JSON validity, if requested
-      shell: bash
-      if: ${{ steps.merge-json.outputs.hasCommitted == 'true' && inputs.check-json-validity == 'true' }}
-      run: |
-        git status | grep 'Your branch is ahead' && shopify theme check -c json
-
     - name: Push the changes, if there are any
       shell: bash
       if: ${{ inputs.push-after-commit == 'true' && steps.merge-json.outputs.hasCommitted == 'true' }}
