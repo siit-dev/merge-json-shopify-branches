@@ -86,14 +86,8 @@ runs:
     - uses: ruby/setup-ruby@v1
       if: ${{ inputs.check-json-validity == 'true' }}
       with:
-        ruby-version: 3.2
+        ruby-version: 3.3
         bundler: 'latest'
-
-    - name: Install Ruby dependencies
-      shell: bash
-      if: ${{ inputs.check-json-validity == 'true' }}
-      run: |
-        gem install theme-check
 
     - name: Install Shopify CLI
       shell: bash
