@@ -80,7 +80,7 @@ async function run(): Promise<void> {
     let formatter = null
     if (formatterCommand && formatterCommand.length > 0) {
       core.info('Creating the formatter function...')
-      formatter = (json: string): string => {
+      formatter = async (json: string): Promise<string> => {
         const tempPath = fs.mkdtempSync('json-merge-shopify')
         const tempFile = `${tempPath}/temp.json`
         fs.writeFileSync(tempFile, json)
