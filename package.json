@@ -33,7 +33,7 @@
     "@shopify/cli": "^3.56.0",
     "@shopify/theme": "^3.56.0",
     "@shopify/cli-kit": "^3.56.0",
-    "@smartimpact-it/json-merge-shopify": "^1.0.27"
+    "@smartimpact-it/json-merge-shopify": "^1.0.28"
   },
   "devDependencies": {
     "@types/node": "^20.3.1",
