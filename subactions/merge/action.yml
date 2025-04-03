@@ -6,7 +6,7 @@ inputs:
   json-paths:
     required: true
     description: 'JSON paths to merge'
-    default: 'config/settings_data.json,locales/en.default.json,locales/en.json'
+    default: 'config/*.json,locales/*.default.json,locales/*.json,templates/**/*.json,sections/**/*.json'
   main-branch:
     required: true
     description: 'Main branch'
