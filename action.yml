@@ -59,6 +59,13 @@ inputs:
   config-file:
     required: false
     description: 'Config file'
+  create-commit:
+    required: false
+    description: 'Create a commit after merging the JSON files'
+    default: 'true'
+  post-merge-script:
+    required: false
+    description: 'Path to a Node.js script to run after merging and before committing (relative to the repo root)'
 
 outputs:
   hasConflict:
@@ -83,12 +90,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - uses: ruby/setup-ruby@v1
-      if: ${{ inputs.check-json-validity == 'true' }}
-      with:
-        ruby-version: 3.3
-        bundler: 'latest'
-
     - name: Install Shopify CLI
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
@@ -130,6 +131,8 @@ runs:
         INPUT_CONFIG_GIT_USER: ${{ inputs.config-git-user }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_CONFIG_FILE: ${{ inputs.config-file }}
+        INPUT_CREATE_COMMIT: ${{ inputs.create-commit }}
+        INPUT_POST_MERGE_SCRIPT: ${{ inputs.post-merge-script }}
       run: |
         pwd
         node dist/index.js

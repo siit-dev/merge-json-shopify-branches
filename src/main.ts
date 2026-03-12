@@ -7,6 +7,7 @@ import {
 } from '@smartimpact-it/json-merge-shopify'
 import {execSync} from 'child_process'
 import * as fs from 'fs'
+import * as path from 'path'
 
 const defaults: Record<string, string> = {
   'json-paths': 'config/*.json,locales/*.json,templates/*.json',
@@ -19,7 +20,9 @@ const defaults: Record<string, string> = {
   preferred: 'theirs',
   'exit-if-no-existing-deployment': 'false',
   'run-locally-only': 'false',
-  verbose: 'false'
+  verbose: 'false',
+  'create-commit': 'true',
+  'post-merge-script': ''
 }
 
 const getInput = (name: string): string => {
@@ -58,7 +61,7 @@ async function run(): Promise<void> {
 
     const jsonPaths = getInput('json-paths')
       .split(/[,\n]/)
-      .map(path => path.trim())
+      .map(p => p.trim())
     const mainBranch = getInput('main-branch')
     const productionBranch = getInput('production-branch')
     const liveMirrorBranch = getInput('live-mirror-branch')
@@ -72,6 +75,8 @@ async function run(): Promise<void> {
     const runLocallyOnly = getInput('run-locally-only')
     const verbose = getInput('verbose')
     const configFile = getInput('config-file')
+    const createCommitInput = getInput('create-commit')
+    const postMergeScript = getInput('post-merge-script')
 
     // Get the project path from current working directory
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()
@@ -117,6 +122,8 @@ async function run(): Promise<void> {
     core.info(`runLocallyOnly: ${runLocallyOnly}`)
     core.info(`verbose: ${verbose}`)
     core.info(`configFile: ${configFile}`)
+    core.info(`createCommit: ${createCommitInput}`)
+    core.info(`postMergeScript: ${postMergeScript}`)
     core.info(`gitRoot: ${gitRoot}`)
 
     const mergerOptions: GitMergerOptions = {
@@ -125,7 +132,7 @@ async function run(): Promise<void> {
       mainBranch,
       productionBranch,
       liveMirrorBranch,
-      createCommit: true,
+      createCommit: false,
       checkJsonValidity: checkJsonValidity === 'true',
       preferred: preferred as 'ours' | 'theirs',
       formatter,
@@ -146,15 +153,43 @@ async function run(): Promise<void> {
       merger = new GitMerger(null, mergerOptions)
     }
 
-    // Run the merge
+    // Run the merge (commit is always deferred to this action)
     core.info('Running the GitMerger...')
     const result: GitMergerResult = await merger.run()
+
+    let hasCommitted = false
+
+    if (!result.hasConflict && !result.hasErrors) {
+      // Run the optional post-merge script before committing
+      if (postMergeScript && postMergeScript.length > 0) {
+        const scriptPath = path.resolve(gitRoot, postMergeScript)
+        core.info(`Running post-merge script: ${scriptPath}`)
+        execSync(`node ${scriptPath}`, {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            MERGED_FILES: (result.mergedFiles || []).join(','),
+            HAS_CONFLICT: result.hasConflict ? 'true' : 'false',
+            HAS_ERRORS: result.hasErrors ? 'true' : 'false',
+            GIT_ROOT: gitRoot
+          },
+          stdio: 'inherit'
+        })
+        core.info('Post-merge script completed.')
+      }
+
+      // Create the commit if requested
+      if (createCommitInput !== 'false') {
+        core.info('Creating the commit...')
+        hasCommitted = await merger.commit()
+      }
+    }
 
     // Output the result
     core.setOutput('hasConflict', result.hasConflict ? 'true' : 'false')
     core.setOutput('hasErrors', result.hasErrors ? 'true' : 'false')
     core.setOutput('error', result.error || '')
-    core.setOutput('hasCommitted', result.hasCommitted ? 'true' : 'false')
+    core.setOutput('hasCommitted', hasCommitted ? 'true' : 'false')
     core.setOutput('mergedFiles', result.mergedFiles || '')
     core.setOutput('log', mergerLog.join('\n'))
 
@@ -166,7 +201,7 @@ async function run(): Promise<void> {
       core.error(result.error || 'Error merging JSON files...')
       core.setFailed(result.error || 'Error merging JSON files')
     }
-    if (result.hasCommitted) {
+    if (hasCommitted) {
       core.info('Committed the merged JSON files...')
     }
     if (result.mergedFiles && result.mergedFiles.length > 0) {
