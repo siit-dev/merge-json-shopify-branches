@@ -24,10 +24,9 @@ jobs:
           fetch-depth: 0
 
       - name: Create the `live-mirror` branch
-        if: false
         run: |
-          git checkout -b live-mirror
-          git checkout main
+          git show-ref --verify --quiet refs/heads/main || git branch main HEAD
+          git show-ref --verify --quiet refs/heads/live-mirror || git branch live-mirror HEAD
 
       - name: Run the action
         uses: ./
