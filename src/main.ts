@@ -7,7 +7,11 @@ import {
 } from '@smartimpact-it/json-merge-shopify'
 import {execSync} from 'child_process'
 import * as fs from 'fs'
-import * as path from 'path'
+import {
+  PostMergeHookOptions,
+  resolvePostMergeHookOptions,
+  runPostMergeHooks
+} from './post-merge'
 
 const defaults: Record<string, string> = {
   'json-paths': 'config/*.json,locales/*.json,templates/*.json',
@@ -22,17 +26,88 @@ const defaults: Record<string, string> = {
   'run-locally-only': 'false',
   verbose: 'false',
   'create-commit': 'true',
-  'post-merge-script': ''
+  'post-merge-node-script': '',
+  'post-merge-script': '',
+  'post-merge-command': '',
+  postMergeCommand: '',
+  'post-merge-script-command-continue-on-error': 'false',
+  postMergeScriptCommandContinueOnError: 'false'
 }
 
-const getInput = (name: string): string => {
-  const input =
-    core.getInput(name, {required: false}) ||
-    core.getInput(name.replace('-', '_'), {required: false}) ||
-    defaults[name] ||
-    defaults[name.replace('-', '_')] ||
-    ''
-  return input
+const unique = (values: string[]): string[] => {
+  return values.filter(
+    (value, index) => value && values.indexOf(value) === index
+  )
+}
+
+const toKebabCase = (name: string): string => {
+  return name
+    .replace(/_/g, '-')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+}
+
+const toCamelCase = (name: string): string => {
+  return toKebabCase(name).replace(/-([a-z0-9])/g, (_, character: string) =>
+    character.toUpperCase()
+  )
+}
+
+const toSnakeCase = (name: string): string => {
+  return toKebabCase(name).replace(/-/g, '_')
+}
+
+const toInputEnvName = (name: string): string => {
+  return `INPUT_${toSnakeCase(name).toUpperCase()}`
+}
+
+const getInputNameVariants = (name: string): string[] => {
+  return unique([name, toKebabCase(name), toSnakeCase(name), toCamelCase(name)])
+}
+
+const getRawInput = (names: string[]): string => {
+  for (const inputName of names) {
+    const input = core.getInput(inputName, {required: false})
+    if (input) return input
+  }
+
+  for (const inputName of names) {
+    const envInput = process.env[toInputEnvName(inputName)]
+    if (envInput) return envInput
+  }
+
+  return ''
+}
+
+const getInput = (name: string, aliases: string[] = []): string => {
+  const names = unique(
+    [name, ...aliases].flatMap(inputName => getInputNameVariants(inputName))
+  )
+  const input = getRawInput(names)
+
+  if (input) return input
+
+  for (const inputName of names) {
+    if (defaults[inputName]) return defaults[inputName]
+  }
+
+  return ''
+}
+
+const getPostMergeHookOptions = (): PostMergeHookOptions => {
+  return resolvePostMergeHookOptions(
+    {
+      continueOnError: getInput('post-merge-script-command-continue-on-error'),
+      continueOnErrorAlias: getRawInput([
+        'postMergeScriptCommandContinueOnError'
+      ]),
+      postMergeNodeScript: getInput('post-merge-node-script'),
+      postMergeScript: getInput('post-merge-script'),
+      postMergeCommand: getInput('post-merge-command'),
+      postMergeCommandAlias: getRawInput(['postMergeCommand'])
+    },
+    core
+  )
 }
 
 const logger: Logger = (
@@ -76,7 +151,7 @@ async function run(): Promise<void> {
     const verbose = getInput('verbose')
     const configFile = getInput('config-file')
     const createCommitInput = getInput('create-commit')
-    const postMergeScript = getInput('post-merge-script')
+    const postMergeHooks = getPostMergeHookOptions()
 
     // Get the project path from current working directory
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()
@@ -123,7 +198,11 @@ async function run(): Promise<void> {
     core.info(`verbose: ${verbose}`)
     core.info(`configFile: ${configFile}`)
     core.info(`createCommit: ${createCommitInput}`)
-    core.info(`postMergeScript: ${postMergeScript}`)
+    core.info(`postMergeNodeScript: ${postMergeHooks.postMergeNodeScript}`)
+    core.info(`postMergeScript: ${postMergeHooks.postMergeScript}`)
+    core.info(
+      `postMergeScriptCommandContinueOnError: ${postMergeHooks.continueOnError}`
+    )
     core.info(`gitRoot: ${gitRoot}`)
 
     const mergerOptions: GitMergerOptions = {
@@ -160,23 +239,16 @@ async function run(): Promise<void> {
     let hasCommitted = false
 
     if (!result.hasConflict && !result.hasErrors) {
-      // Run the optional post-merge script before committing
-      if (postMergeScript && postMergeScript.length > 0) {
-        const scriptPath = path.resolve(gitRoot, postMergeScript)
-        core.info(`Running post-merge script: ${scriptPath}`)
-        execSync(`node ${scriptPath}`, {
-          encoding: 'utf8',
-          env: {
-            ...process.env,
-            MERGED_FILES: (result.mergedFiles || []).join(','),
-            HAS_CONFLICT: result.hasConflict ? 'true' : 'false',
-            HAS_ERRORS: result.hasErrors ? 'true' : 'false',
-            GIT_ROOT: gitRoot
-          },
-          stdio: 'inherit'
-        })
-        core.info('Post-merge script completed.')
-      }
+      runPostMergeHooks(
+        postMergeHooks,
+        {
+          gitRoot,
+          mergedFiles: result.mergedFiles,
+          hasConflict: false,
+          hasErrors: false
+        },
+        core
+      )
 
       // Create the commit if requested
       if (createCommitInput !== 'false') {

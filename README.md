@@ -93,3 +93,31 @@ jobs:
 | `config-git-user`                | Configure git user             | `true`                                                                                                                                                       |
 | `verbose`                        | Verbose                        | `false`                                                                                                                                                      |
 | `config-file`                    | Config file                    | The path to a config file that will be used to load the settings. See [json-merge-shopify](https://www.npmjs.com/package/@smartimpact-it/json-merge-shopify) |
+| `create-commit`                  | Create a commit after merging  | `true`                                                                                                                                                       |
+| `post-merge-node-script`         | Path to a Node.js script to run after merging and before committing, relative to the repository root | Leave blank to skip                                                                                                                         |
+| `post-merge-script`              | Shell command to run after merging and before committing | Leave blank to skip                                                                                                                                 |
+| `post-merge-command`             | Alias for `post-merge-script` | Leave blank to skip                                                                                                                                  |
+| `postMergeCommand`               | Alias for `post-merge-script` | Leave blank to skip                                                                                                                                          |
+| `post-merge-script-command-continue-on-error` | Continue when the post-merge script or command fails | `false`                                                                                                                           |
+| `postMergeScriptCommandContinueOnError` | Alias for `post-merge-script-command-continue-on-error` | `false`                                                                                                                       |
+
+## Post-merge hooks
+
+Post-merge hooks run only when the merge finishes without conflicts or errors. They run before the action creates a commit.
+
+Use `post-merge-node-script` when you want to run a repository-relative Node.js script. The action resolves the path from the repository root and runs it with Node.
+
+Use `post-merge-script` when you want to run a shell command exactly as provided. The command is not prefixed with `node`, so it can call any executable available in the runner environment. `post-merge-command` and `postMergeCommand` are supported as aliases for this raw command hook.
+
+If both `post-merge-node-script` and `post-merge-script` are configured, the Node script runs first and the raw script command runs second. If `post-merge-script` and a command alias are both configured, `post-merge-script` takes precedence. If both command aliases are configured without `post-merge-script`, `post-merge-command` takes precedence.
+
+By default, a failing post-merge script or command fails the action and prevents the commit step from running. Set `post-merge-script-command-continue-on-error` or `postMergeScriptCommandContinueOnError` to `true` to log the hook failure and continue.
+
+Both post-merge hook types receive these environment variables:
+
+| Variable       | Description                                      |
+| -------------- | ------------------------------------------------ |
+| `MERGED_FILES` | Comma-separated list of files merged by the action |
+| `HAS_CONFLICT` | `true` when the merge result has conflicts       |
+| `HAS_ERRORS`   | `true` when the merge result has errors          |
+| `GIT_ROOT`     | Repository root path                             |

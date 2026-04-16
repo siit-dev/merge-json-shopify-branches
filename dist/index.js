@@ -43,7 +43,7 @@ const core = __importStar(__nccwpck_require__(2186));
 const json_merge_shopify_1 = __nccwpck_require__(8546);
 const child_process_1 = __nccwpck_require__(2081);
 const fs = __importStar(__nccwpck_require__(7147));
-const path = __importStar(__nccwpck_require__(1017));
+const post_merge_1 = __nccwpck_require__(5206);
 const defaults = {
     'json-paths': 'config/*.json,locales/*.json,templates/*.json',
     'main-branch': 'main',
@@ -57,15 +57,69 @@ const defaults = {
     'run-locally-only': 'false',
     verbose: 'false',
     'create-commit': 'true',
-    'post-merge-script': ''
+    'post-merge-node-script': '',
+    'post-merge-script': '',
+    'post-merge-command': '',
+    postMergeCommand: '',
+    'post-merge-script-command-continue-on-error': 'false',
+    postMergeScriptCommandContinueOnError: 'false'
 };
-const getInput = (name) => {
-    const input = core.getInput(name, { required: false }) ||
-        core.getInput(name.replace('-', '_'), { required: false }) ||
-        defaults[name] ||
-        defaults[name.replace('-', '_')] ||
-        '';
-    return input;
+const unique = (values) => {
+    return values.filter((value, index) => value && values.indexOf(value) === index);
+};
+const toKebabCase = (name) => {
+    return name
+        .replace(/_/g, '-')
+        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+        .toLowerCase();
+};
+const toCamelCase = (name) => {
+    return toKebabCase(name).replace(/-([a-z0-9])/g, (_, character) => character.toUpperCase());
+};
+const toSnakeCase = (name) => {
+    return toKebabCase(name).replace(/-/g, '_');
+};
+const toInputEnvName = (name) => {
+    return `INPUT_${toSnakeCase(name).toUpperCase()}`;
+};
+const getInputNameVariants = (name) => {
+    return unique([name, toKebabCase(name), toSnakeCase(name), toCamelCase(name)]);
+};
+const getRawInput = (names) => {
+    for (const inputName of names) {
+        const input = core.getInput(inputName, { required: false });
+        if (input)
+            return input;
+    }
+    for (const inputName of names) {
+        const envInput = process.env[toInputEnvName(inputName)];
+        if (envInput)
+            return envInput;
+    }
+    return '';
+};
+const getInput = (name, aliases = []) => {
+    const names = unique([name, ...aliases].flatMap(inputName => getInputNameVariants(inputName)));
+    const input = getRawInput(names);
+    if (input)
+        return input;
+    for (const inputName of names) {
+        if (defaults[inputName])
+            return defaults[inputName];
+    }
+    return '';
+};
+const getPostMergeHookOptions = () => {
+    return (0, post_merge_1.resolvePostMergeHookOptions)({
+        continueOnError: getInput('post-merge-script-command-continue-on-error'),
+        continueOnErrorAlias: getRawInput([
+            'postMergeScriptCommandContinueOnError'
+        ]),
+        postMergeNodeScript: getInput('post-merge-node-script'),
+        postMergeScript: getInput('post-merge-script'),
+        postMergeCommand: getInput('post-merge-command'),
+        postMergeCommandAlias: getRawInput(['postMergeCommand'])
+    }, core);
 };
 const logger = (message, type) => {
     switch (type) {
@@ -102,7 +156,7 @@ function run() {
             const verbose = getInput('verbose');
             const configFile = getInput('config-file');
             const createCommitInput = getInput('create-commit');
-            const postMergeScript = getInput('post-merge-script');
+            const postMergeHooks = getPostMergeHookOptions();
             // Get the project path from current working directory
             const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd();
             // Create the formatter function if a command was provided
@@ -145,7 +199,9 @@ function run() {
             core.info(`verbose: ${verbose}`);
             core.info(`configFile: ${configFile}`);
             core.info(`createCommit: ${createCommitInput}`);
-            core.info(`postMergeScript: ${postMergeScript}`);
+            core.info(`postMergeNodeScript: ${postMergeHooks.postMergeNodeScript}`);
+            core.info(`postMergeScript: ${postMergeHooks.postMergeScript}`);
+            core.info(`postMergeScriptCommandContinueOnError: ${postMergeHooks.continueOnError}`);
             core.info(`gitRoot: ${gitRoot}`);
             const mergerOptions = {
                 gitRoot,
@@ -178,17 +234,12 @@ function run() {
             const result = yield merger.run();
             let hasCommitted = false;
             if (!result.hasConflict && !result.hasErrors) {
-                // Run the optional post-merge script before committing
-                if (postMergeScript && postMergeScript.length > 0) {
-                    const scriptPath = path.resolve(gitRoot, postMergeScript);
-                    core.info(`Running post-merge script: ${scriptPath}`);
-                    (0, child_process_1.execSync)(`node ${scriptPath}`, {
-                        encoding: 'utf8',
-                        env: Object.assign(Object.assign({}, process.env), { MERGED_FILES: (result.mergedFiles || []).join(','), HAS_CONFLICT: result.hasConflict ? 'true' : 'false', HAS_ERRORS: result.hasErrors ? 'true' : 'false', GIT_ROOT: gitRoot }),
-                        stdio: 'inherit'
-                    });
-                    core.info('Post-merge script completed.');
-                }
+                (0, post_merge_1.runPostMergeHooks)(postMergeHooks, {
+                    gitRoot,
+                    mergedFiles: result.mergedFiles,
+                    hasConflict: false,
+                    hasErrors: false
+                }, core);
                 // Create the commit if requested
                 if (createCommitInput !== 'false') {
                     core.info('Creating the commit...');
@@ -227,6 +278,110 @@ function run() {
     });
 }
 run();
+
+
+/***/ }),
+
+/***/ 5206:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.runPostMergeHooks = exports.buildPostMergeHookEnv = exports.resolvePostMergeHookOptions = void 0;
+const child_process_1 = __nccwpck_require__(2081);
+const path = __importStar(__nccwpck_require__(1017));
+const resolvePostMergeHookOptions = (inputs, logger) => {
+    if (inputs.postMergeScript &&
+        inputs.postMergeCommand &&
+        inputs.postMergeScript !== inputs.postMergeCommand) {
+        logger.warning('Both post-merge-script and post-merge-command were provided. Using post-merge-script.');
+    }
+    if (inputs.postMergeScript &&
+        inputs.postMergeCommandAlias &&
+        inputs.postMergeScript !== inputs.postMergeCommandAlias) {
+        logger.warning('Both post-merge-script and postMergeCommand were provided. Using post-merge-script.');
+    }
+    if (!inputs.postMergeScript &&
+        inputs.postMergeCommand &&
+        inputs.postMergeCommandAlias &&
+        inputs.postMergeCommand !== inputs.postMergeCommandAlias) {
+        logger.warning('Both post-merge-command and postMergeCommand were provided. Using post-merge-command.');
+    }
+    return {
+        postMergeNodeScript: inputs.postMergeNodeScript,
+        postMergeScript: inputs.postMergeScript ||
+            inputs.postMergeCommand ||
+            inputs.postMergeCommandAlias,
+        continueOnError: inputs.continueOnError === 'true' ||
+            inputs.continueOnErrorAlias === 'true'
+    };
+};
+exports.resolvePostMergeHookOptions = resolvePostMergeHookOptions;
+const quoteShellArg = (value) => {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+};
+const buildPostMergeHookEnv = (context) => {
+    return Object.assign(Object.assign({}, process.env), { MERGED_FILES: (context.mergedFiles || []).join(','), HAS_CONFLICT: context.hasConflict ? 'true' : 'false', HAS_ERRORS: context.hasErrors ? 'true' : 'false', GIT_ROOT: context.gitRoot });
+};
+exports.buildPostMergeHookEnv = buildPostMergeHookEnv;
+const getErrorMessage = (error) => {
+    if (error instanceof Error)
+        return error.message;
+    return String(error);
+};
+const runHookCommand = (label, command, context, continueOnError, logger, executor) => {
+    try {
+        logger.info(`Running ${label}: ${command}`);
+        executor(command, {
+            encoding: 'utf8',
+            env: (0, exports.buildPostMergeHookEnv)(context),
+            stdio: 'inherit'
+        });
+        logger.info(`${label} completed.`);
+    }
+    catch (error) {
+        const message = `${label} failed: ${getErrorMessage(error)}`;
+        if (!continueOnError) {
+            throw new Error(message);
+        }
+        logger.error(message);
+        logger.warning(`Continuing after failed ${label}.`);
+    }
+};
+const runPostMergeHooks = (options, context, logger, executor = child_process_1.execSync) => {
+    if (options.postMergeNodeScript && options.postMergeNodeScript.length > 0) {
+        const scriptPath = path.resolve(context.gitRoot, options.postMergeNodeScript);
+        runHookCommand('post-merge node script', `node ${quoteShellArg(scriptPath)}`, context, options.continueOnError, logger, executor);
+    }
+    if (options.postMergeScript && options.postMergeScript.length > 0) {
+        runHookCommand('post-merge script', options.postMergeScript, context, options.continueOnError, logger, executor);
+    }
+};
+exports.runPostMergeHooks = runPostMergeHooks;
 
 
 /***/ }),
