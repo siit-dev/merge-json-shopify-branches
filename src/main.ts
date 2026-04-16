@@ -12,6 +12,7 @@ import {
   resolvePostMergeHookOptions,
   runPostMergeHooks
 } from './post-merge'
+import {stageAndCommitPostMergeChanges} from './git-staging'
 
 const defaults: Record<string, string> = {
   'json-paths': 'config/*.json,locales/*.json,templates/*.json',
@@ -252,8 +253,11 @@ async function run(): Promise<void> {
 
       // Create the commit if requested
       if (createCommitInput !== 'false') {
-        core.info('Creating the commit...')
-        hasCommitted = await merger.commit()
+        hasCommitted = await stageAndCommitPostMergeChanges({
+          gitRoot,
+          commit: async () => merger.commit(),
+          logger: core
+        })
       }
     }
 

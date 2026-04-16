@@ -1,5 +1,10 @@
 import * as path from 'path'
 import {describe, expect, jest, test} from '@jest/globals'
+import {ExecFileSyncOptions} from 'child_process'
+import {
+  GitStagingExecutor,
+  stageAndCommitPostMergeChanges
+} from '../src/git-staging'
 import {
   buildPostMergeHookEnv,
   PostMergeHookExecutor,
@@ -18,6 +23,25 @@ const createLogger = (): jest.Mocked<PostMergeHookLogger> => ({
 
 const createExecutor = (): jest.MockedFunction<PostMergeHookExecutor> => {
   return jest.fn(() => '') as jest.MockedFunction<PostMergeHookExecutor>
+}
+
+const createGitExecutor = (
+  hasStagedChanges: boolean,
+  status = ''
+): jest.MockedFunction<GitStagingExecutor> => {
+  return jest.fn(
+    (_file: string, args: string[], _options: ExecFileSyncOptions): string => {
+      if (args.includes('status')) {
+        return status
+      }
+
+      if (args.includes('diff') && hasStagedChanges) {
+        throw {status: 1}
+      }
+
+      return ''
+    }
+  ) as jest.MockedFunction<GitStagingExecutor>
 }
 
 describe('post-merge hooks', () => {
@@ -261,5 +285,69 @@ describe('post-merge hooks', () => {
         GIT_ROOT: gitRoot
       })
     )
+  })
+})
+
+describe('post-merge staging and commit', () => {
+  test('stages post-merge changes before checking for a commit', async () => {
+    const logger = createLogger()
+    const executor = createGitExecutor(true, 'M  templates/index.json\n')
+    const commit = jest.fn(async () => true)
+
+    await stageAndCommitPostMergeChanges({
+      gitRoot,
+      commit,
+      logger,
+      executor
+    })
+
+    expect(executor).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['-C', gitRoot, 'add', '-A'],
+      expect.objectContaining({stdio: 'inherit'})
+    )
+    expect(executor).toHaveBeenNthCalledWith(
+      3,
+      'git',
+      ['-C', gitRoot, 'diff', '--cached', '--quiet'],
+      expect.objectContaining({stdio: 'ignore'})
+    )
+  })
+
+  test('commits when post-merge changes are staged', async () => {
+    const logger = createLogger()
+    const executor = createGitExecutor(true, 'M  templates/index.json\n')
+    const commit = jest.fn(async () => true)
+
+    const hasCommitted = await stageAndCommitPostMergeChanges({
+      gitRoot,
+      commit,
+      logger,
+      executor
+    })
+
+    expect(hasCommitted).toBe(true)
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(logger.info.mock.calls).toContainEqual(['Creating the commit...'])
+  })
+
+  test('skips commit when there are no staged changes', async () => {
+    const logger = createLogger()
+    const executor = createGitExecutor(false)
+    const commit = jest.fn(async () => true)
+
+    const hasCommitted = await stageAndCommitPostMergeChanges({
+      gitRoot,
+      commit,
+      logger,
+      executor
+    })
+
+    expect(hasCommitted).toBe(false)
+    expect(commit).not.toHaveBeenCalled()
+    expect(logger.info.mock.calls).toContainEqual([
+      'No staged changes to commit after post-merge hooks.'
+    ])
   })
 })

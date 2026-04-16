@@ -1,6 +1,72 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 1591:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.stageAndCommitPostMergeChanges = void 0;
+const child_process_1 = __nccwpck_require__(2081);
+const getErrorStatus = (error) => {
+    if (error &&
+        typeof error === 'object' &&
+        'status' in error &&
+        typeof error.status === 'number') {
+        return error.status;
+    }
+    return null;
+};
+const hasStagedChanges = (gitRoot, executor) => {
+    try {
+        executor('git', ['-C', gitRoot, 'diff', '--cached', '--quiet'], {
+            stdio: 'ignore'
+        });
+        return false;
+    }
+    catch (error) {
+        if (getErrorStatus(error) === 1) {
+            return true;
+        }
+        throw error;
+    }
+};
+const stageAndCommitPostMergeChanges = (_a) => __awaiter(void 0, [_a], void 0, function* ({ gitRoot, commit, logger, executor = child_process_1.execFileSync }) {
+    logger.info('Staging post-merge changes...');
+    executor('git', ['-C', gitRoot, 'add', '-A'], {
+        stdio: 'inherit'
+    });
+    const status = executor('git', ['-C', gitRoot, 'status', '--short'], {
+        encoding: 'utf8'
+    }).toString();
+    if (status.trim()) {
+        logger.info(`Git status after staging post-merge changes:\n${status}`);
+    }
+    else {
+        logger.info('Git status after staging post-merge changes: clean');
+    }
+    if (!hasStagedChanges(gitRoot, executor)) {
+        logger.info('No staged changes to commit after post-merge hooks.');
+        return false;
+    }
+    logger.info('Creating the commit...');
+    return commit();
+});
+exports.stageAndCommitPostMergeChanges = stageAndCommitPostMergeChanges;
+
+
+/***/ }),
+
 /***/ 3109:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -44,6 +110,7 @@ const json_merge_shopify_1 = __nccwpck_require__(8546);
 const child_process_1 = __nccwpck_require__(2081);
 const fs = __importStar(__nccwpck_require__(7147));
 const post_merge_1 = __nccwpck_require__(5206);
+const git_staging_1 = __nccwpck_require__(1591);
 const defaults = {
     'json-paths': 'config/*.json,locales/*.json,templates/*.json',
     'main-branch': 'main',
@@ -242,8 +309,11 @@ function run() {
                 }, core);
                 // Create the commit if requested
                 if (createCommitInput !== 'false') {
-                    core.info('Creating the commit...');
-                    hasCommitted = yield merger.commit();
+                    hasCommitted = yield (0, git_staging_1.stageAndCommitPostMergeChanges)({
+                        gitRoot,
+                        commit: () => __awaiter(this, void 0, void 0, function* () { return merger.commit(); }),
+                        logger: core
+                    });
                 }
             }
             // Output the result
