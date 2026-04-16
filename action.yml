@@ -129,9 +129,12 @@ runs:
 
     - name: Create local tracking branches for merger
       shell: bash
+      env:
+        PRODUCTION_BRANCH: ${{ inputs.production-branch }}
+        LIVE_MIRROR_BRANCH: ${{ inputs.live-mirror-branch }}
       run: |
-        git branch ${{ inputs.production-branch }} origin/${{ inputs.production-branch }} 2>/dev/null || true
-        git branch ${{ inputs.live-mirror-branch }} origin/${{ inputs.live-mirror-branch }} 2>/dev/null || true
+        git branch "$PRODUCTION_BRANCH" "origin/$PRODUCTION_BRANCH" 2>/dev/null || true
+        git branch "$LIVE_MIRROR_BRANCH" "origin/$LIVE_MIRROR_BRANCH" 2>/dev/null || true
 
     - name: Run the merge code
       id: merge-json
