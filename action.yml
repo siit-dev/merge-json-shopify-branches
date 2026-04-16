@@ -127,6 +127,12 @@ runs:
         git config --local user.name github-actions
         git config --local user.email github-actions@github.com
 
+    - name: Create local tracking branches for merger
+      shell: bash
+      run: |
+        git branch ${{ inputs.production-branch }} origin/${{ inputs.production-branch }} 2>/dev/null || true
+        git branch ${{ inputs.live-mirror-branch }} origin/${{ inputs.live-mirror-branch }} 2>/dev/null || true
+
     - name: Run the merge code
       id: merge-json
       working-directory: ${{ github.action_path }}
