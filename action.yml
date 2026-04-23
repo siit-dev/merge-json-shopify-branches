@@ -107,10 +107,28 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Add Shopify CLI to PATH
+      shell: bash
+      if: ${{ inputs.check-json-validity == 'true' }}
+      run: echo "$HOME/.npm-global-shopify/bin" >> $GITHUB_PATH
+
+    - name: Cache Shopify CLI
+      id: cache-shopify-cli
+      if: ${{ inputs.check-json-validity == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm-global-shopify
+        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-v1
+
     - name: Install Shopify CLI
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
-      run: npm install -g @shopify/cli @shopify/theme
+      run: |
+        if command -v shopify &> /dev/null; then
+          echo "Shopify CLI already available: $(shopify version)"
+        else
+          npm install -g --prefix "$HOME/.npm-global-shopify" @shopify/cli @shopify/theme
+        fi
 
     - name: Print out the current directory
       shell: bash
