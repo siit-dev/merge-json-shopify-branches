@@ -104,11 +104,27 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(2186));
 const json_merge_shopify_1 = __nccwpck_require__(8546);
 const child_process_1 = __nccwpck_require__(2081);
 const fs = __importStar(__nccwpck_require__(7147));
+const path = __importStar(__nccwpck_require__(1017));
+const prettier_1 = __importDefault(__nccwpck_require__(4588));
 const post_merge_1 = __nccwpck_require__(5206);
 const git_staging_1 = __nccwpck_require__(1591);
 const defaults = {
@@ -242,6 +258,30 @@ function run() {
                     });
                     fs.unlinkSync(tempFile);
                     return formatted;
+                });
+            }
+            else {
+                // Default formatter: use prettier but strip plugins that may not be
+                // available in the action environment (e.g. @shopify/prettier-plugin-liquid
+                // listed in the workspace .prettierrc).
+                formatter = (json, file) => __awaiter(this, void 0, void 0, function* () {
+                    const filePath = path.resolve(gitRoot, file);
+                    const config = (yield prettier_1.default.resolveConfig(filePath, { useCache: false })) || {};
+                    try {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        return prettier_1.default.format(json, Object.assign(Object.assign({}, config), { filepath: filePath }));
+                    }
+                    catch (e) {
+                        const err = e;
+                        if ((err === null || err === void 0 ? void 0 : err.code) === 'MODULE_NOT_FOUND') {
+                            // A plugin listed in the config couldn't be loaded — retry without plugins.
+                            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                            const _a = config, { plugins: _plugins } = _a, configWithoutPlugins = __rest(_a, ["plugins"]);
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            return prettier_1.default.format(json, Object.assign(Object.assign({}, configWithoutPlugins), { filepath: filePath }));
+                        }
+                        throw e;
+                    }
                 });
             }
             // Catch the console.log output from the merger

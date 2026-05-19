@@ -7,6 +7,8 @@ import {
 } from '@smartimpact-it/json-merge-shopify'
 import {execSync} from 'child_process'
 import * as fs from 'fs'
+import * as path from 'path'
+import prettier from 'prettier'
 import {
   PostMergeHookOptions,
   resolvePostMergeHookOptions,
@@ -158,7 +160,8 @@ async function run(): Promise<void> {
     const gitRoot = process.env.GITHUB_WORKSPACE || process.cwd()
 
     // Create the formatter function if a command was provided
-    let formatter = null
+    let formatter: ((json: string, file: string) => Promise<string>) | null =
+      null
     if (formatterCommand && formatterCommand.length > 0) {
       core.info('Creating the formatter function...')
       formatter = async (json: string): Promise<string> => {
@@ -173,6 +176,33 @@ async function run(): Promise<void> {
         })
         fs.unlinkSync(tempFile)
         return formatted
+      }
+    } else {
+      // Default formatter: use prettier but strip plugins that may not be
+      // available in the action environment (e.g. @shopify/prettier-plugin-liquid
+      // listed in the workspace .prettierrc).
+      formatter = async (json: string, file: string): Promise<string> => {
+        const filePath = path.resolve(gitRoot, file)
+        const config =
+          (await prettier.resolveConfig(filePath, {useCache: false})) || {}
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (prettier as any).format(json, {...config, filepath: filePath})
+        } catch (e: unknown) {
+          const err = e as NodeJS.ErrnoException
+          if (err?.code === 'MODULE_NOT_FOUND') {
+            // A plugin listed in the config couldn't be loaded — retry without plugins.
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const {plugins: _plugins, ...configWithoutPlugins} =
+              config as Record<string, unknown>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return (prettier as any).format(json, {
+              ...configWithoutPlugins,
+              filepath: filePath
+            })
+          }
+          throw e
+        }
       }
     }
 
