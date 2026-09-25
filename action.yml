@@ -8,7 +8,7 @@ inputs:
   json-paths:
     required: false
     description: 'JSON paths to merge'
-    default: 'config/*.json,locales/*.json,templates/**/*.json'
+    default: 'config/*.json,locales/*.json,templates/**/*.json,sections/**/*.json'
   main-branch:
     required: false
     description: 'Main branch'

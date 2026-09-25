@@ -128,7 +128,7 @@ const prettier_1 = __importDefault(__nccwpck_require__(4588));
 const post_merge_1 = __nccwpck_require__(5206);
 const git_staging_1 = __nccwpck_require__(1591);
 const defaults = {
-    'json-paths': 'config/*.json,locales/*.json,templates/*.json',
+    'json-paths': 'config/*.json,locales/*.json,templates/**/*.json,sections/**/*.json',
     'main-branch': 'main',
     'production-branch': 'production',
     'live-mirror-branch': 'live-mirror',
@@ -2607,6 +2607,7 @@ class GitMerger {
         this.chalkInstance = null;
         this.ancestorIdentifier = null;
         this.lastMergedFiles = null;
+        this.lastSourceCommit = null;
         /**
          * Remove the git root prefix from the file path.
          *
@@ -2712,6 +2713,7 @@ class GitMerger {
         return config;
     }
     async run() {
+        this.lastSourceCommit = null;
         // 0. Do we have uncommitted changes?
         let status = await this.git.status();
         if (status.files.length > 0) {
@@ -2722,6 +2724,7 @@ class GitMerger {
         try {
             // 1. Pull the latest changes from the remote "live-mirror" branch
             await this.pullLiveMirrorBranch();
+            this.lastSourceCommit = (await this.git.revparse([this.liveMirrorBranch])).trim();
             // 2. Make a list of all JSON files.
             const { valid: allJsons } = await this.getAllJsons();
             // 3a. Make sure we are on the "main" branch
@@ -3263,9 +3266,7 @@ class GitMerger {
         if (!Array.isArray(this.lastMergedFiles)) {
             throw new Error('No merged files found. Please run the merger first (via `run()`).');
         }
-        const message = this.commitMessage
-            .replace('#liveMirror#', this.liveMirrorBranch)
-            .replace('#files#', this.lastMergedFiles.join(', '));
+        const message = await this.buildCommitMessage(this.lastMergedFiles);
         await this.logSuccess('Committing the changes');
         await this.git.commit(message);
         return true;
@@ -3282,10 +3283,8 @@ class GitMerger {
      */
     async maybeCreateCommit(mergedFiles = []) {
         const createCommit = this.createCommit;
-        const message = this.commitMessage
-            .replace('#liveMirror#', this.liveMirrorBranch)
-            .replace('#files#', mergedFiles.join(', '));
         if (createCommit) {
+            const message = await this.buildCommitMessage(mergedFiles);
             await this.logSuccess('Committing the changes');
             await this.git.commit(message);
             return true;
@@ -3293,6 +3292,106 @@ class GitMerger {
         else {
             await this.logWarning('Not committing the changes (not requested to do so).');
             return false;
+        }
+    }
+    async buildCommitMessage(mergedFiles) {
+        const message = this.commitMessage
+            .replace('#liveMirror#', this.liveMirrorBranch)
+            .replace('#files#', mergedFiles.join(', '));
+        if (!this.lastSourceCommit || mergedFiles.length === 0)
+            return message;
+        try {
+            const previousMessage = await this.git.raw([
+                'log',
+                this.mainBranch,
+                '-n',
+                '1',
+                '--format=%B',
+                '--fixed-strings',
+                '--grep=Shopify-Source-Commit:',
+            ]);
+            const marker = previousMessage.match(/^Shopify-Source-Commit: ([0-9a-f]{40,64})\r?$/m);
+            let range;
+            if (previousMessage.includes('Shopify-Source-Commit:')) {
+                if (!marker) {
+                    await this.logWarning('Invalid Shopify source commit marker; omitting attribution.');
+                    return message;
+                }
+                try {
+                    await this.git.raw([
+                        'merge-base',
+                        '--is-ancestor',
+                        marker[1],
+                        this.lastSourceCommit,
+                    ]);
+                }
+                catch {
+                    await this.logWarning('Shopify source commit is no longer reachable; omitting attribution.');
+                    return message;
+                }
+                range = [`${marker[1]}..${this.lastSourceCommit}`];
+            }
+            else {
+                const lastAutomatedDate = (await this.git.raw([
+                    'log',
+                    this.mainBranch,
+                    '-n',
+                    '1',
+                    '--format=%cI',
+                    '--fixed-strings',
+                    '--grep=[AUTOMATED]',
+                ])).trim();
+                if (lastAutomatedDate) {
+                    range = [
+                        `--since=${lastAutomatedDate}`,
+                        this.lastSourceCommit,
+                        '--not',
+                        this.mainBranch,
+                    ];
+                }
+                else {
+                    const commonCommit = (await this.git.raw([
+                        'merge-base',
+                        this.mainBranch,
+                        this.lastSourceCommit,
+                    ])).trim();
+                    range = [`${commonCommit}..${this.lastSourceCommit}`];
+                }
+            }
+            const history = await this.git.raw([
+                'log',
+                '--reverse',
+                '--format=%H%x00%B%x00%x00',
+                ...range,
+                '--',
+                ...mergedFiles,
+            ]);
+            const editorsByShop = new Map();
+            for (const record of history.split('\0\0')) {
+                const separator = record.indexOf('\0');
+                if (separator < 0)
+                    continue;
+                const body = record.slice(separator + 1);
+                const shop = body
+                    .match(/^Committed from shop: ([^\r\n]+)\r?$/m)?.[1]
+                    .trim();
+                const editor = body
+                    .match(/^Theme last edited by: ([^\r\n]+)\r?$/m)?.[1]
+                    .trim();
+                if (!shop || !editor)
+                    continue;
+                if (!editorsByShop.has(shop))
+                    editorsByShop.set(shop, new Set());
+                editorsByShop.get(shop).add(editor);
+            }
+            if (editorsByShop.size === 0)
+                return message;
+            const attribution = Array.from(editorsByShop, ([shop, editors]) => `Committed from shop: ${shop}\nTheme edited by: ${Array.from(editors).join(', ')}`).join('\n\n');
+            return `${message.trimEnd()}\n\n${attribution}\n\nShopify-Source-Commit: ${this.lastSourceCommit}`;
+        }
+        catch (error) {
+            await this.logWarning(`Could not read Shopify commit attribution: ${error}`);
+            return message;
         }
     }
     /**
@@ -4749,26 +4848,6 @@ var init_git_response_error = __esm({
   }
 });
 
-// src/lib/args/pathspec.ts
-function pathspec(...paths) {
-  const key = new String(paths);
-  cache.set(key, paths);
-  return key;
-}
-function isPathSpec(path) {
-  return path instanceof String && cache.has(path);
-}
-function toPaths(pathSpec) {
-  return cache.get(pathSpec) || [];
-}
-var cache;
-var init_pathspec = __esm({
-  "src/lib/args/pathspec.ts"() {
-    "use strict";
-    cache = /* @__PURE__ */ new WeakMap();
-  }
-});
-
 // src/lib/errors/git-construct-error.ts
 var GitConstructError;
 var init_git_construct_error = __esm({
@@ -4913,7 +4992,7 @@ function prefixedArray(input, prefix) {
   return output;
 }
 function bufferToString(input) {
-  return (Array.isArray(input) ? import_node_buffer.Buffer.concat(input) : input).toString("utf-8");
+  return (Array.isArray(input) ? Buffer.concat(input) : input).toString("utf-8");
 }
 function pick(source, properties) {
   const out = {};
@@ -4933,11 +5012,10 @@ function orVoid(input) {
   }
   return input;
 }
-var import_node_buffer, import_file_exists, NULL, NOOP, objectToString;
+var import_file_exists, NULL, NOOP, objectToString;
 var init_util = __esm({
   "src/lib/utils/util.ts"() {
     "use strict";
-    import_node_buffer = __nccwpck_require__(2254);
     import_file_exists = __nccwpck_require__(4751);
     init_argument_filters();
     NULL = "\0";
@@ -4955,7 +5033,7 @@ function filterType(input, filter, def) {
   return arguments.length > 2 ? def : void 0;
 }
 function filterPrimitives(input, omit) {
-  const type = isPathSpec(input) ? "string" : typeof input;
+  const type = (0, import_args_pathspec.isPathSpec)(input) ? "string" : typeof input;
   return /number|string|boolean/.test(type) && (!omit || !omit.includes(type));
 }
 function filterPlainObject(input) {
@@ -4964,11 +5042,11 @@ function filterPlainObject(input) {
 function filterFunction(input) {
   return typeof input === "function";
 }
-var filterArray, filterNumber, filterString, filterStringOrStringArray, filterHasLength;
+var import_args_pathspec, filterArray, filterNumber, filterString, filterStringOrStringArray, filterHasLength;
 var init_argument_filters = __esm({
   "src/lib/utils/argument-filters.ts"() {
     "use strict";
-    init_pathspec();
+    import_args_pathspec = __nccwpck_require__(5270);
     init_util();
     filterArray = (input) => {
       return Array.isArray(input);
@@ -4977,7 +5055,7 @@ var init_argument_filters = __esm({
       return typeof input === "number";
     };
     filterString = (input) => {
-      return typeof input === "string" || isPathSpec(input);
+      return typeof input === "string" || (0, import_args_pathspec.isPathSpec)(input);
     };
     filterStringOrStringArray = (input) => {
       return filterString(input) || Array.isArray(input) && input.every(filterString);
@@ -5108,7 +5186,7 @@ function appendTaskOptions(options, commands = []) {
   }
   return Object.keys(options).reduce((commands2, key) => {
     const value = options[key];
-    if (isPathSpec(value)) {
+    if ((0, import_args_pathspec2.isPathSpec)(value)) {
       commands2.push(value);
     } else if (filterPrimitives(value, ["boolean"])) {
       commands2.push(key + "=" + value);
@@ -5149,12 +5227,13 @@ function trailingFunctionArgument(args, includeNoop = true) {
   const callback = asFunction(last(args));
   return includeNoop || isUserFunction(callback) ? callback : void 0;
 }
+var import_args_pathspec2;
 var init_task_options = __esm({
   "src/lib/utils/task-options.ts"() {
     "use strict";
     init_argument_filters();
     init_util();
-    init_pathspec();
+    import_args_pathspec2 = __nccwpck_require__(5270);
   }
 });
 
@@ -5841,12 +5920,13 @@ __export(api_exports, {
   ResetMode: () => ResetMode,
   TaskConfigurationError: () => TaskConfigurationError,
   grepQueryBuilder: () => grepQueryBuilder,
-  pathspec: () => pathspec
+  pathspec: () => import_args_pathspec3.pathspec
 });
+var import_args_pathspec3;
 var init_api = __esm({
   "src/lib/api.ts"() {
     "use strict";
-    init_pathspec();
+    import_args_pathspec3 = __nccwpck_require__(5270);
     init_git_construct_error();
     init_git_error();
     init_git_plugin_error();
@@ -5894,83 +5974,25 @@ var init_abort_plugin = __esm({
 });
 
 // src/lib/plugins/block-unsafe-operations-plugin.ts
-function isConfigSwitch(arg) {
-  return typeof arg === "string" && arg.trim().toLowerCase() === "-c";
-}
-function isCloneUploadPackSwitch(char, arg) {
-  if (typeof arg !== "string" || !arg.includes(char)) {
-    return false;
-  }
-  const cleaned = arg.trim().replace(/\0/g, "");
-  return /^(--no)?-{1,2}[\dlsqvnobucj]+(\s|$)/.test(cleaned);
-}
-function preventConfigBuilder(config, setting, message = String(config)) {
-  const regex = typeof config === "string" ? new RegExp(`\\s*${config}`, "i") : config;
-  return function preventCommand(options, arg, next) {
-    if (options[setting] !== true && isConfigSwitch(arg) && regex.test(next)) {
-      throw new GitPluginError(
-        void 0,
-        "unsafe",
-        `Configuring ${message} is not permitted without enabling ${setting}`
-      );
-    }
-  };
-}
-function preventUploadPack(arg, method) {
-  if (/^\s*--(upload|receive)-pack/.test(arg)) {
-    throw new GitPluginError(
-      void 0,
-      "unsafe",
-      `Use of --upload-pack or --receive-pack is not permitted without enabling allowUnsafePack`
-    );
-  }
-  if (method === "clone" && isCloneUploadPackSwitch("u", arg)) {
-    throw new GitPluginError(
-      void 0,
-      "unsafe",
-      `Use of clone with option -u is not permitted without enabling allowUnsafePack`
-    );
-  }
-  if (method === "push" && /^\s*--exec\b/.test(arg)) {
-    throw new GitPluginError(
-      void 0,
-      "unsafe",
-      `Use of push with option --exec is not permitted without enabling allowUnsafePack`
-    );
-  }
-}
-function blockUnsafeOperationsPlugin({
-  allowUnsafePack = false,
-  ...options
-} = {}) {
+function blockUnsafeOperationsPlugin(options = {}) {
   return {
     type: "spawn.args",
-    action(args, context) {
-      args.forEach((current, index) => {
-        const next = index < args.length ? args[index + 1] : "";
-        allowUnsafePack || preventUploadPack(current, context.method);
-        preventUnsafeConfig.forEach((helper) => helper(options, current, next));
-      });
+    action(args, { env }) {
+      for (const vulnerability of (0, import_argv_parser.vulnerabilityCheck)(args, env)) {
+        if (options[vulnerability.category] !== true) {
+          throw new GitPluginError(void 0, "unsafe", vulnerability.message);
+        }
+      }
       return args;
     }
   };
 }
-var preventUnsafeConfig;
+var import_argv_parser;
 var init_block_unsafe_operations_plugin = __esm({
   "src/lib/plugins/block-unsafe-operations-plugin.ts"() {
     "use strict";
+    import_argv_parser = __nccwpck_require__(7574);
     init_git_plugin_error();
-    preventUnsafeConfig = [
-      preventConfigBuilder(
-        /^\s*protocol(.[a-z]+)?.allow/i,
-        "allowUnsafeProtocolOverride",
-        "protocol.allow"
-      ),
-      preventConfigBuilder("core.sshCommand", "allowUnsafeSshCommand"),
-      preventConfigBuilder("core.gitProxy", "allowUnsafeGitProxy"),
-      preventConfigBuilder("core.hooksPath", "allowUnsafeHooksPath"),
-      preventConfigBuilder("diff.external", "allowUnsafeDiffExternal")
-    ];
   }
 });
 
@@ -6334,13 +6356,13 @@ function suffixPathsPlugin() {
       }
       for (let i = 0; i < data.length; i++) {
         const param = data[i];
-        if (isPathSpec(param)) {
-          append2(toPaths(param));
+        if ((0, import_args_pathspec4.isPathSpec)(param)) {
+          append2((0, import_args_pathspec4.toPaths)(param));
           continue;
         }
         if (param === "--") {
           append2(
-            data.slice(i + 1).flatMap((item) => isPathSpec(item) && toPaths(item) || item)
+            data.slice(i + 1).flatMap((item) => (0, import_args_pathspec4.isPathSpec)(item) && (0, import_args_pathspec4.toPaths)(item) || item)
           );
           break;
         }
@@ -6350,10 +6372,11 @@ function suffixPathsPlugin() {
     }
   };
 }
+var import_args_pathspec4;
 var init_suffix_paths_plugin = __esm({
   "src/lib/plugins/suffix-paths.plugin.ts"() {
     "use strict";
-    init_pathspec();
+    import_args_pathspec4 = __nccwpck_require__(5270);
   }
 });
 
@@ -6575,11 +6598,10 @@ var init_git_executor_chain = __esm({
       }
       async attemptRemoteTask(task, logger) {
         const binary = this._plugins.exec("spawn.binary", "", pluginContext(task, task.commands));
-        const args = this._plugins.exec(
-          "spawn.args",
-          [...task.commands],
-          pluginContext(task, task.commands)
-        );
+        const args = this._plugins.exec("spawn.args", [...task.commands], {
+          ...pluginContext(task, task.commands),
+          env: { ...this.env }
+        });
         const raw = await this.gitResponse(
           task,
           binary,
@@ -7382,7 +7404,7 @@ function parseLogOptions(opt = {}, customArgs = []) {
     suffix.push(`${opt.from || ""}${rangeOperator}${opt.to || ""}`);
   }
   if (filterString(opt.file)) {
-    command.push("--follow", pathspec(opt.file));
+    command.push("--follow", (0, import_args_pathspec5.pathspec)(opt.file));
   }
   appendTaskOptions(userOptions(opt), command);
   return {
@@ -7420,12 +7442,12 @@ function log_default() {
     );
   }
 }
-var excludeOptions;
+var import_args_pathspec5, excludeOptions;
 var init_log = __esm({
   "src/lib/tasks/log.ts"() {
     "use strict";
     init_log_format();
-    init_pathspec();
+    import_args_pathspec5 = __nccwpck_require__(5270);
     init_parse_list_log_summary();
     init_utils();
     init_task();
@@ -8203,17 +8225,17 @@ function clone_default() {
     }
   };
 }
-var cloneTask, cloneMirrorTask;
+var import_args_pathspec6, cloneTask, cloneMirrorTask;
 var init_clone = __esm({
   "src/lib/tasks/clone.ts"() {
     "use strict";
     init_task();
     init_utils();
-    init_pathspec();
+    import_args_pathspec6 = __nccwpck_require__(5270);
     cloneTask = (repo, directory, customArgs) => {
       const commands = ["clone", ...customArgs];
-      filterString(repo) && commands.push(pathspec(repo));
-      filterString(directory) && commands.push(pathspec(directory));
+      filterString(repo) && commands.push((0, import_args_pathspec6.pathspec)(repo));
+      filterString(directory) && commands.push((0, import_args_pathspec6.pathspec)(directory));
       return straightThroughStringTask(commands);
     };
     cloneMirrorTask = (repo, directory, customArgs) => {
@@ -86593,11 +86615,11 @@ module.exports = require("net");
 
 /***/ }),
 
-/***/ 2254:
+/***/ 5714:
 /***/ ((module) => {
 
 "use strict";
-module.exports = require("node:buffer");
+module.exports = require("node:diagnostics_channel");
 
 /***/ }),
 
@@ -88474,7 +88496,7 @@ exports.range = range;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.EXPANSION_MAX = void 0;
+exports.EXPANSION_MAX_REWRITES = exports.EXPANSION_MAX_DEPTH = exports.EXPANSION_MAX_LENGTH = exports.EXPANSION_MAX = void 0;
 exports.expand = expand;
 const balanced_match_1 = __nccwpck_require__(8819);
 const escSlash = '\0SLASH' + Math.random() + '\0';
@@ -88493,6 +88515,35 @@ const closePattern = /\\}/g;
 const commaPattern = /\\,/g;
 const periodPattern = /\\\./g;
 exports.EXPANSION_MAX = 100_000;
+// `EXPANSION_MAX` caps the *number* of expansions, but not their length. An
+// input like `'{a,b}'.repeat(1500)` stays under that count - its output is
+// truncated to 100k results - while making every result ~1500 characters
+// long. The result set, and the intermediate arrays built while combining
+// brace sets, then grow large enough to exhaust memory and crash the process
+// (CVE-2026-14257). `EXPANSION_MAX_LENGTH` bounds the total number of
+// characters the accumulator may hold at any point, so memory stays flat no
+// matter how many brace groups are chained. The limit sits well above any
+// realistic expansion (100k results hitting `EXPANSION_MAX` measure ~1M
+// characters) so legitimate input is unaffected.
+exports.EXPANSION_MAX_LENGTH = 4_000_000;
+// `expand_` recurses once per level of brace *nesting* - both when expanding a
+// set's comma members and when re-wrapping a set whose body is a single part.
+// The CVE-2026-14257 fix made the *tail* iterative (recursion on `m.post`, one
+// level per chained group), which left nesting depth unbounded: about 3,100
+// levels of `{{{...a,b...}}}` - only ~6KB of input - exhausted the native stack
+// and crashed the process. `EXPANSION_MAX_DEPTH` bounds how deep the parser
+// will follow nesting. It sits far above any realistic pattern and well below
+// the depth at which the stack runs out.
+exports.EXPANSION_MAX_DEPTH = 1_000;
+// Bash keeps a quirk where a brace group followed by a comma set still expands
+// (`{a},b}`). The parser implements it by rewriting the string and restarting
+// the scan, absorbing one `}` per pass. `n` trailing braces therefore cost `n`
+// full passes over a string that itself grows by one `escClose` sentinel each
+// time - quadratic in `n`, with a ~26x constant from the sentinel's length.
+// 128KB of `'{a}' + '}'.repeat(n) + ',z}'` blocked the event loop for 27
+// seconds to produce two results. `EXPANSION_MAX_REWRITES` bounds how many
+// times the scan may restart. Real `{a},b}` input needs a handful.
+exports.EXPANSION_MAX_REWRITES = 1_000;
 function numeric(str) {
     return !isNaN(str) ? parseInt(str, 10) : str.charCodeAt(0);
 }
@@ -88512,37 +88563,52 @@ function unescapeBraces(str) {
         .replace(escCommaPattern, ',')
         .replace(escPeriodPattern, '.');
 }
+// Like `target.push(...items)` but doesn't overflow the stack
+function pushAll(target, items) {
+    for (let i = 0; i < items.length; i++) {
+        target.push(items[i]);
+    }
+}
 /**
  * Basically just str.split(","), but handling cases
  * where we have nested braced sections, which should be
  * treated as individual members, like {a,{b,c},d}
  */
 function parseCommaParts(str) {
-    if (!str) {
-        return [''];
-    }
     const parts = [];
-    const m = (0, balanced_match_1.balanced)('{', '}', str);
-    if (!m) {
-        return str.split(',');
+    // Walk the brace groups iteratively. Recursing on `post` once per group let a
+    // chain of them exhaust the stack - the parsing-side counterpart to
+    // the `expand_` overflow fixed for CVE-2026-14257, and not something `max` or
+    // `maxLength` can bound, since it happens before expansion.
+    //
+    // The part the next chunk continues
+    let carry = '';
+    for (;;) {
+        const m = (0, balanced_match_1.balanced)('{', '}', str);
+        if (!m) {
+            const tail = str.split(',');
+            tail[0] = carry + tail[0];
+            pushAll(parts, tail);
+            return parts;
+        }
+        const { pre, body, post } = m;
+        const p = pre.split(',');
+        p[0] = carry + p[0];
+        p[p.length - 1] += '{' + body + '}';
+        if (!post.length) {
+            pushAll(parts, p);
+            return parts;
+        }
+        carry = p.pop();
+        pushAll(parts, p);
+        str = post;
     }
-    const { pre, body, post } = m;
-    const p = pre.split(',');
-    p[p.length - 1] += '{' + body + '}';
-    const postParts = parseCommaParts(post);
-    if (post.length) {
-        ;
-        p[p.length - 1] += postParts.shift();
-        p.push.apply(p, postParts);
-    }
-    parts.push.apply(parts, p);
-    return parts;
 }
 function expand(str, options = {}) {
     if (!str) {
         return [];
     }
-    const { max = exports.EXPANSION_MAX } = options;
+    const { max = exports.EXPANSION_MAX, maxLength = exports.EXPANSION_MAX_LENGTH, maxDepth = exports.EXPANSION_MAX_DEPTH, maxRewrites = exports.EXPANSION_MAX_REWRITES, } = options;
     // I don't know why Bash 4.3 does this, but it does.
     // Anything starting with {} will have the first two bytes preserved
     // but *only* at the top level, so {},a}b will not expand to anything,
@@ -88552,7 +88618,7 @@ function expand(str, options = {}) {
     if (str.slice(0, 2) === '{}') {
         str = '\\{\\}' + str.slice(2);
     }
-    return expand_(escapeBraces(str), max, true).map(unescapeBraces);
+    return expand_(escapeBraces(str), max, maxLength, maxDepth, 0, maxRewrites, true).map(unescapeBraces);
 }
 function embrace(str) {
     return '{' + str + '}';
@@ -88566,109 +88632,199 @@ function lte(i, y) {
 function gte(i, y) {
     return i >= y;
 }
-function expand_(str, max, isTop) {
-    /** @type {string[]} */
-    const expansions = [];
-    const m = (0, balanced_match_1.balanced)('{', '}', str);
-    if (!m)
-        return [str];
-    // no need to expand pre, since it is guaranteed to be free of brace-sets
-    const pre = m.pre;
-    const post = m.post.length ? expand_(m.post, max, false) : [''];
-    if (/\$$/.test(m.pre)) {
-        for (let k = 0; k < post.length && k < max; k++) {
-            const expansion = pre + '{' + m.body + '}' + post[k];
-            expansions.push(expansion);
+// Build `{ acc[a] + pre + values[v] }` for every combination, capping the
+// number of results at `max` and the total number of characters at `maxLength`.
+// This is the one place output grows, so bounding it here keeps the single
+// accumulator - and therefore memory - flat regardless of how many brace groups
+// are combined (CVE-2026-14257).
+function combine(acc, pre, values, max, maxLength, dropEmpties) {
+    const out = [];
+    let length = 0;
+    for (let a = 0; a < acc.length; a++) {
+        for (let v = 0; v < values.length; v++) {
+            if (out.length >= max)
+                return out;
+            const expansion = acc[a] + pre + values[v];
+            // Bash drops empty results at the top level. Skip them before they count
+            // against `max`, so `max` bounds the number of *kept* results.
+            if (dropEmpties && !expansion)
+                continue;
+            if (length + expansion.length > maxLength)
+                return out;
+            out.push(expansion);
+            length += expansion.length;
         }
     }
-    else {
+    return out;
+}
+// The expansion values of a single numeric (`1..5`) or alphabetic (`a..e..2`)
+// sequence body.
+function expandSequence(body, isAlphaSequence, max, maxLength) {
+    const n = body.split(/\.\./);
+    const N = [];
+    // A sequence body always splits into two or three parts, but the compiler
+    // can't know that.
+    /* c8 ignore start */
+    if (n[0] === undefined || n[1] === undefined) {
+        return N;
+    }
+    /* c8 ignore stop */
+    const x = numeric(n[0]);
+    const y = numeric(n[1]);
+    const width = Math.max(n[0].length, n[1].length);
+    let incr = n.length === 3 && n[2] !== undefined ?
+        Math.max(Math.abs(numeric(n[2])), 1)
+        : 1;
+    let test = lte;
+    const reverse = y < x;
+    if (reverse) {
+        incr *= -1;
+        test = gte;
+    }
+    const pad = n.some(isPadded);
+    let length = 0;
+    for (let i = x; test(i, y) && N.length < max; i += incr) {
+        let c;
+        if (isAlphaSequence) {
+            c = String.fromCharCode(i);
+            if (c === '\\') {
+                c = '';
+            }
+        }
+        else {
+            c = String(i);
+            if (pad) {
+                const need = width - c.length;
+                if (need > 0) {
+                    const z = new Array(need + 1).join('0');
+                    if (i < 0) {
+                        c = '-' + z + c.slice(1);
+                    }
+                    else {
+                        c = z + c;
+                    }
+                }
+            }
+        }
+        if (length + c.length > maxLength)
+            break;
+        N.push(c);
+        length += c.length;
+    }
+    return N;
+}
+function expand_(str, max, maxLength, maxDepth, depth, maxRewrites, isTop) {
+    // Too deeply nested to keep following: treat the rest as literal, the same
+    // way a group that cannot expand is already handled. Truncating rather than
+    // throwing keeps `expand` total, matching `max` and `maxLength`.
+    if (depth > maxDepth) {
+        return [str];
+    }
+    // Consume the string's top-level brace groups left to right, threading a
+    // running set of combined prefixes (`acc`). Expanding the tail iteratively -
+    // rather than recursing on `m.post` once per group - keeps the native stack
+    // depth constant, so deeply chained input (`'{a,b}'.repeat(3000)`) can no
+    // longer overflow the stack, and leaves a single accumulator whose size
+    // `maxLength` bounds directly (CVE-2026-14257).
+    let acc = [''];
+    // Bash drops empty results, but only when the *first* top-level group is a
+    // comma set - a sequence like `{a..\}` may legitimately yield ''. The drop
+    // is on the final strings, so it is applied to whichever `combine` produces
+    // them (the one with no brace set left in the tail).
+    // How many times the `{a},b}` rewrite below has restarted the scan. Each pass
+    // re-reads the whole string, so leaving this unbounded is quadratic.
+    let rewrites = 0;
+    let dropEmpties = false;
+    let firstGroup = true;
+    for (;;) {
+        const m = (0, balanced_match_1.balanced)('{', '}', str);
+        // No brace set left: the rest of the string is literal.
+        if (!m) {
+            return combine(acc, str, [''], max, maxLength, dropEmpties);
+        }
+        // no need to expand pre, since it is guaranteed to be free of brace-sets
+        const pre = m.pre;
+        if (/\$$/.test(pre)) {
+            acc = combine(acc, pre + '{' + m.body + '}', [''], max, maxLength, dropEmpties && !m.post.length);
+            firstGroup = false;
+            if (!m.post.length)
+                break;
+            str = m.post;
+            continue;
+        }
         const isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
         const isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
         const isSequence = isNumericSequence || isAlphaSequence;
         const isOptions = m.body.indexOf(',') >= 0;
         if (!isSequence && !isOptions) {
             // {a},b}
-            if (m.post.match(/,(?!,).*\}/)) {
+            if (rewrites < maxRewrites && m.post.match(/,(?!,).*\}/)) {
+                rewrites++;
                 str = m.pre + '{' + m.body + escClose + m.post;
-                return expand_(str, max, true);
+                isTop = true;
+                continue;
             }
-            return [str];
+            // Nothing here expands, so the whole remaining string is literal.
+            return combine(acc, pre + '{' + m.body + '}' + m.post, [''], max, maxLength, dropEmpties);
         }
-        let n;
+        if (firstGroup) {
+            dropEmpties = isTop && !isSequence;
+            firstGroup = false;
+        }
+        let values;
         if (isSequence) {
-            n = m.body.split(/\.\./);
+            values = expandSequence(m.body, isAlphaSequence, max, maxLength);
         }
         else {
-            n = parseCommaParts(m.body);
+            let n = parseCommaParts(m.body);
             if (n.length === 1 && n[0] !== undefined) {
                 // x{{a,b}}y ==> x{a}y x{b}y
-                n = expand_(n[0], max, false).map(embrace);
+                n = expand_(n[0], max, maxLength, maxDepth, depth + 1, maxRewrites, false).map(embrace);
                 //XXX is this necessary? Can't seem to hit it in tests.
                 /* c8 ignore start */
                 if (n.length === 1) {
-                    return post.map(p => m.pre + n[0] + p);
+                    acc = combine(acc, pre + n[0], [''], max, maxLength, dropEmpties && !m.post.length);
+                    if (!m.post.length)
+                        break;
+                    str = m.post;
+                    continue;
                 }
                 /* c8 ignore stop */
             }
-        }
-        // at this point, n is the parts, and we know it's not a comma set
-        // with a single entry.
-        let N;
-        if (isSequence && n[0] !== undefined && n[1] !== undefined) {
-            const x = numeric(n[0]);
-            const y = numeric(n[1]);
-            const width = Math.max(n[0].length, n[1].length);
-            let incr = n.length === 3 && n[2] !== undefined ? Math.abs(numeric(n[2])) : 1;
-            let test = lte;
-            const reverse = y < x;
-            if (reverse) {
-                incr *= -1;
-                test = gte;
+            // Values that `combine` is going to drop as empty produce no result, so
+            // they must not count against `max` - otherwise `{a,,b}` with `max: 2`
+            // would stop at `['a', '']` and yield one result instead of two. Skipping
+            // them outright keeps `values` bounded while leaving `max` a bound on
+            // *kept* results.
+            let dropsEmpties = dropEmpties && !m.post.length && !pre;
+            for (let d = 0; dropsEmpties && d < acc.length; d++) {
+                if (acc[d]) {
+                    dropsEmpties = false;
+                }
             }
-            const pad = n.some(isPadded);
-            N = [];
-            for (let i = x; test(i, y); i += incr) {
-                let c;
-                if (isAlphaSequence) {
-                    c = String.fromCharCode(i);
-                    if (c === '\\') {
-                        c = '';
+            values = [];
+            let valuesLength = 0;
+            outer: for (let j = 0; j < n.length; j++) {
+                const expanded = expand_(n[j], max, maxLength, maxDepth, depth + 1, maxRewrites, false);
+                for (let k = 0; k < expanded.length; k++) {
+                    const v = expanded[k];
+                    if (dropsEmpties && !v)
+                        continue;
+                    if (values.length >= max ||
+                        valuesLength + v.length > maxLength) {
+                        break outer;
                     }
-                }
-                else {
-                    c = String(i);
-                    if (pad) {
-                        const need = width - c.length;
-                        if (need > 0) {
-                            const z = new Array(need + 1).join('0');
-                            if (i < 0) {
-                                c = '-' + z + c.slice(1);
-                            }
-                            else {
-                                c = z + c;
-                            }
-                        }
-                    }
-                }
-                N.push(c);
-            }
-        }
-        else {
-            N = [];
-            for (let j = 0; j < n.length; j++) {
-                N.push.apply(N, expand_(n[j], max, false));
-            }
-        }
-        for (let j = 0; j < N.length; j++) {
-            for (let k = 0; k < post.length && expansions.length < max; k++) {
-                const expansion = pre + N[j] + post[k];
-                if (!isTop || isSequence || expansion) {
-                    expansions.push(expansion);
+                    values.push(v);
+                    valuesLength += v.length;
                 }
             }
         }
+        acc = combine(acc, pre, values, max, maxLength, dropEmpties && !m.post.length);
+        if (!m.post.length)
+            break;
+        str = m.post;
     }
-    return expansions;
+    return acc;
 }
 //# sourceMappingURL=index.js.map
 
@@ -90310,15 +90466,14 @@ class AST {
     }
     // reconstructs the pattern
     toString() {
-        if (this.#toString !== undefined)
-            return this.#toString;
-        if (!this.type) {
-            return (this.#toString = this.#parts.map(p => String(p)).join(''));
-        }
-        else {
-            return (this.#toString =
-                this.type + '(' + this.#parts.map(p => String(p)).join('|') + ')');
-        }
+        return (this.#toString !== undefined ? this.#toString
+            : !this.type ?
+                (this.#toString = this.#parts.map(p => String(p)).join(''))
+                : (this.#toString =
+                    this.type +
+                        '(' +
+                        this.#parts.map(p => String(p)).join('|') +
+                        ')'));
     }
     #fillNegs() {
         /* c8 ignore start */
@@ -90598,7 +90753,7 @@ class AST {
     }
     #canUsurpType(c) {
         const m = usurpMap.get(this.type);
-        return !!(m?.has(c));
+        return !!m?.has(c);
     }
     #canUsurp(child) {
         if (!child ||
@@ -91181,7 +91336,7 @@ const minimatch = (p, pattern, options = {}) => {
 };
 exports.minimatch = minimatch;
 // Optimized checking for the most common glob patterns.
-const starDotExtRE = /^\*+([^+@!?\*\[\(]*)$/;
+const starDotExtRE = /^\*+([^+@!?*[(]*)$/;
 const starDotExtTest = (ext) => (f) => !f.startsWith('.') && f.endsWith(ext);
 const starDotExtTestDot = (ext) => (f) => f.endsWith(ext);
 const starDotExtTestNocase = (ext) => {
@@ -91200,7 +91355,7 @@ const dotStarTest = (f) => f !== '.' && f !== '..' && f.startsWith('.');
 const starRE = /^\*+$/;
 const starTest = (f) => f.length !== 0 && !f.startsWith('.');
 const starTestDot = (f) => f.length !== 0 && f !== '.' && f !== '..';
-const qmarksRE = /^\?+([^+@!?\*\[\(]*)?$/;
+const qmarksRE = /^\?+([^+@!?*[(]*)?$/;
 const qmarksTestNocase = ([$0, ext = '']) => {
     const noext = qmarksTestNoExt([$0]);
     if (!ext)
@@ -91432,6 +91587,7 @@ class Minimatch {
         // step 2: expand braces
         this.globSet = [...new Set(this.braceExpand())];
         if (options.debug) {
+            //oxlint-disable-next-line no-console
             this.debug = (...args) => console.error(...args);
         }
         this.debug(this.pattern, this.globSet);
@@ -91494,10 +91650,10 @@ class Minimatch {
     preprocess(globParts) {
         // if we're not in globstar mode, then turn ** into *
         if (this.options.noglobstar) {
-            for (let i = 0; i < globParts.length; i++) {
-                for (let j = 0; j < globParts[i].length; j++) {
-                    if (globParts[i][j] === '**') {
-                        globParts[i][j] = '*';
+            for (const partset of globParts) {
+                for (let j = 0; j < partset.length; j++) {
+                    if (partset[j] === '**') {
+                        partset[j] = '*';
                     }
                 }
             }
@@ -91585,7 +91741,11 @@ class Minimatch {
             let dd = 0;
             while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
                 const p = parts[dd - 1];
-                if (p && p !== '.' && p !== '..' && p !== '**') {
+                if (p &&
+                    p !== '.' &&
+                    p !== '..' &&
+                    p !== '**' &&
+                    !(this.isWindows && /^[a-z]:$/i.test(p))) {
                     didSomething = true;
                     parts.splice(dd - 1, 2);
                     dd -= 2;
@@ -91834,15 +91994,17 @@ class Minimatch {
         // split the pattern up into globstar-delimited sections
         // the tail has to be at the end, and the others just have
         // to be found in order from the head.
-        const [head, body, tail] = partial ? [
-            pattern.slice(patternIndex, firstgs),
-            pattern.slice(firstgs + 1),
-            [],
-        ] : [
-            pattern.slice(patternIndex, firstgs),
-            pattern.slice(firstgs + 1, lastgs),
-            pattern.slice(lastgs + 1),
-        ];
+        const [head, body, tail] = partial ?
+            [
+                pattern.slice(patternIndex, firstgs),
+                pattern.slice(firstgs + 1),
+                [],
+            ]
+            : [
+                pattern.slice(patternIndex, firstgs),
+                pattern.slice(firstgs + 1, lastgs),
+                pattern.slice(lastgs + 1),
+            ];
         // check the head, from the current file/pattern index.
         if (head.length) {
             const fileHead = file.slice(fileIndex, fileIndex + head.length);
@@ -92188,7 +92350,7 @@ class Minimatch {
             this.regexp = new RegExp(re, [...flags].join(''));
             /* c8 ignore start */
         }
-        catch (ex) {
+        catch {
             // should be impossible
             this.regexp = false;
         }
@@ -92203,7 +92365,7 @@ class Minimatch {
         if (this.preserveMultipleSlashes) {
             return p.split('/');
         }
-        else if (this.isWindows && /^\/\/[^\/]+/.test(p)) {
+        else if (this.isWindows && /^\/\/[^/]+/.test(p)) {
             // add an extra '' for the one we lose
             return ['', ...p.split(/\/+/)];
         }
@@ -92245,8 +92407,7 @@ class Minimatch {
                 filename = ff[i];
             }
         }
-        for (let i = 0; i < set.length; i++) {
-            const pattern = set[i];
+        for (const pattern of set) {
             let file = ff;
             if (options.matchBase && pattern.length === 1) {
                 file = [filename];
@@ -92316,16 +92477,16 @@ exports.unescape = void 0;
 const unescape = (s, { windowsPathsNoEscape = false, magicalBraces = true, } = {}) => {
     if (magicalBraces) {
         return windowsPathsNoEscape ?
-            s.replace(/\[([^\/\\])\]/g, '$1')
+            s.replace(/\[([^/\\])\]/g, '$1')
             : s
-                .replace(/((?!\\).|^)\[([^\/\\])\]/g, '$1$2')
-                .replace(/\\([^\/])/g, '$1');
+                .replace(/((?!\\).|^)\[([^/\\])\]/g, '$1$2')
+                .replace(/\\([^/])/g, '$1');
     }
     return windowsPathsNoEscape ?
-        s.replace(/\[([^\/\\{}])\]/g, '$1')
+        s.replace(/\[([^/\\{}])\]/g, '$1')
         : s
-            .replace(/((?!\\).|^)\[([^\/\\{}])\]/g, '$1$2')
-            .replace(/\\([^\/{}])/g, '$1');
+            .replace(/((?!\\).|^)\[([^/\\{}])\]/g, '$1$2')
+            .replace(/\\([^/{}])/g, '$1');
 };
 exports.unescape = unescape;
 //# sourceMappingURL=unescape.js.map
@@ -93407,7 +93568,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.PathScurry = exports.Path = exports.PathScurryDarwin = exports.PathScurryPosix = exports.PathScurryWin32 = exports.PathScurryBase = exports.PathPosix = exports.PathWin32 = exports.PathBase = exports.ChildrenCache = exports.ResolveCache = void 0;
-const lru_cache_1 = __nccwpck_require__(3567);
+const lru_cache_1 = __nccwpck_require__(6646);
 const node_path_1 = __nccwpck_require__(9411);
 const node_url_1 = __nccwpck_require__(1041);
 const fs_1 = __nccwpck_require__(7147);
@@ -95402,12 +95563,32 @@ exports.PathScurry = process.platform === 'win32' ? PathScurryWin32
 
 /***/ }),
 
-/***/ 3567:
+/***/ 6646:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+var j=(u,t)=>()=>(t||u((t={exports:{}}).exports,t),t.exports);var I=j(O=>{"use strict";Object.defineProperty(O,"__esModule",{value:!0});O.tracing=O.metrics=void 0;var U=__nccwpck_require__(5714);O.metrics=(0,U.channel)("lru-cache:metrics");O.tracing=(0,U.tracingChannel)("lru-cache")});var P=j(R=>{"use strict";Object.defineProperty(R,"__esModule",{value:!0});R.defaultPerf=void 0;R.defaultPerf=typeof performance=="object"&&performance&&typeof performance.now=="function"?performance:Date});Object.defineProperty(exports, "__esModule", ({value:!0}));exports.LRUCache=void 0;var g=I(),N=P(),C=()=>g.metrics.hasSubscribers||g.tracing.hasSubscribers,k=new Set,G=typeof process=="object"&&process?process:{},V=(u,t,e,i)=>{typeof G.emitWarning=="function"?G.emitWarning(u,t,e,i):console.error(`[${e}] ${t}: ${u}`)},q=u=>!k.has(u);var T=u=>!!u&&u===Math.floor(u)&&u>0&&isFinite(u),H=u=>T(u)?u<=Math.pow(2,8)?Uint8Array:u<=Math.pow(2,16)?Uint16Array:u<=Math.pow(2,32)?Uint32Array:u<=Number.MAX_SAFE_INTEGER?W:null:null,W=class extends Array{constructor(t){super(t),this.fill(0)}},L=class u{heap;length;static#o=!1;static create(t){let e=H(t);if(!e)return[];u.#o=!0;let i=new u(t,e);return u.#o=!1,i}constructor(t,e){if(!u.#o)throw new TypeError("instantiate Stack using Stack.create(n)");this.heap=new e(t),this.length=0}push(t){this.heap[this.length++]=t}pop(){return this.heap[--this.length]}},M=class u{#o;#c;#m;#W;#S;#x;#j;#w;get perf(){return this.#w}ttl;ttlResolution;ttlAutopurge;updateAgeOnGet;updateAgeOnHas;allowStale;noDisposeOnSet;noUpdateTTL;maxEntrySize;sizeCalculation;noDeleteOnFetchRejection;noDeleteOnStaleGet;allowStaleOnFetchAbort;allowStaleOnFetchRejection;ignoreFetchAbort;backgroundFetchSize;#n;#b;#s;#i;#t;#l;#u;#a;#h;#_;#r;#y;#F;#d;#g;#T;#U;#f;#R;static unsafeExposeInternals(t){return{starts:t.#F,ttls:t.#d,autopurgeTimers:t.#g,sizes:t.#y,keyMap:t.#s,keyList:t.#i,valList:t.#t,next:t.#l,prev:t.#u,get head(){return t.#a},get tail(){return t.#h},free:t.#_,isBackgroundFetch:e=>t.#e(e),backgroundFetch:(e,i,s,n)=>t.#G(e,i,s,n),moveToTail:e=>t.#M(e),indexes:e=>t.#A(e),rindexes:e=>t.#z(e),isStale:e=>t.#p(e)}}get max(){return this.#o}get maxSize(){return this.#c}get calculatedSize(){return this.#b}get size(){return this.#n}get fetchMethod(){return this.#x}get memoMethod(){return this.#j}get dispose(){return this.#m}get onInsert(){return this.#W}get disposeAfter(){return this.#S}constructor(t){let{max:e=0,ttl:i,ttlResolution:s=1,ttlAutopurge:n,updateAgeOnGet:o,updateAgeOnHas:l,allowStale:h,dispose:r,onInsert:c,disposeAfter:w,noDisposeOnSet:y,noUpdateTTL:d,maxSize:p=0,maxEntrySize:f=0,sizeCalculation:_,fetchMethod:a,memoMethod:S,noDeleteOnFetchRejection:F,noDeleteOnStaleGet:b,allowStaleOnFetchRejection:m,allowStaleOnFetchAbort:A,ignoreFetchAbort:z,backgroundFetchSize:x=1,perf:v}=t;if(this.backgroundFetchSize=x,v!==void 0&&typeof v?.now!="function")throw new TypeError("perf option must have a now() method if specified");if(this.#w=v??N.defaultPerf,e!==0&&!T(e))throw new TypeError("max option must be a nonnegative integer");let E=e?H(e):Array;if(!E)throw new Error("invalid max value: "+e);if(this.#o=e,this.#c=p,this.maxEntrySize=f||this.#c,this.sizeCalculation=_,this.sizeCalculation){if(!this.#c&&!this.maxEntrySize)throw new TypeError("cannot set sizeCalculation without setting maxSize or maxEntrySize");if(typeof this.sizeCalculation!="function")throw new TypeError("sizeCalculation set to non-function")}if(S!==void 0&&typeof S!="function")throw new TypeError("memoMethod must be a function if defined");if(this.#j=S,a!==void 0&&typeof a!="function")throw new TypeError("fetchMethod must be a function if specified");if(this.#x=a,this.#U=!!a,this.#s=new Map,this.#i=Array.from({length:e}).fill(void 0),this.#t=Array.from({length:e}).fill(void 0),this.#l=new E(e),this.#u=new E(e),this.#a=0,this.#h=0,this.#_=L.create(e),this.#n=0,this.#b=0,typeof r=="function"&&(this.#m=r),typeof c=="function"&&(this.#W=c),typeof w=="function"?(this.#S=w,this.#r=[]):(this.#S=void 0,this.#r=void 0),this.#T=!!this.#m,this.#R=!!this.#W,this.#f=!!this.#S,this.noDisposeOnSet=!!y,this.noUpdateTTL=!!d,this.noDeleteOnFetchRejection=!!F,this.allowStaleOnFetchRejection=!!m,this.allowStaleOnFetchAbort=!!A,this.ignoreFetchAbort=!!z,this.maxEntrySize!==0){if(this.#c!==0&&!T(this.#c))throw new TypeError("maxSize must be a positive integer if specified");if(!T(this.maxEntrySize))throw new TypeError("maxEntrySize must be a positive integer if specified");this.#X()}if(this.allowStale=!!h,this.noDeleteOnStaleGet=!!b,this.updateAgeOnGet=!!o,this.updateAgeOnHas=!!l,this.ttlResolution=T(s)||s===0?s:1,this.ttlAutopurge=!!n,this.ttl=i||0,this.ttl){if(!T(this.ttl))throw new TypeError("ttl must be a positive integer if specified");this.#k()}if(this.#o===0&&this.ttl===0&&this.#c===0)throw new TypeError("At least one of max, maxSize, or ttl is required");if(!this.ttlAutopurge&&!this.#o&&!this.#c){let D="LRU_CACHE_UNBOUNDED";q(D)&&(k.add(D),V("TTL caching without ttlAutopurge, max, or maxSize can result in unbounded memory consumption.","UnboundedCacheWarning",D,u))}}getRemainingTTL(t){return this.#s.has(t)?1/0:0}#k(){let t=new W(this.#o),e=new W(this.#o);this.#d=t,this.#F=e;let i=this.ttlAutopurge?Array.from({length:this.#o}):void 0;this.#g=i,this.#H=(h,r,c=this.#w.now())=>{e[h]=r!==0?c:0,t[h]=r,s(h,r)},this.#D=h=>{e[h]=t[h]!==0?this.#w.now():0,s(h,t[h])};let s=this.ttlAutopurge?(h,r)=>{if(i?.[h]&&(clearTimeout(i[h]),i[h]=void 0),r&&r!==0&&i){let c=setTimeout(()=>{this.#p(h)?(this.#v(this.#i[h],"expire"),i[h]=void 0):s(h,l(h))},r+1);c.unref&&c.unref(),i[h]=c}}:()=>{};this.#E=(h,r)=>{if(t[r]){let c=t[r],w=e[r];if(!c||!w)return;h.ttl=c,h.start=w,h.now=n||o();let y=h.now-w;h.remainingTTL=c-y}};let n=0,o=()=>{let h=this.#w.now();if(this.ttlResolution>0){n=h;let r=setTimeout(()=>n=0,this.ttlResolution);r.unref&&r.unref()}return h};this.getRemainingTTL=h=>{let r=this.#s.get(h);return r===void 0?0:l(r)};let l=h=>{let r=t[h],c=e[h];if(!r||!c)return 1/0;let w=(n||o())-c;return r-w};this.#p=h=>{let r=e[h],c=t[h];return!!c&&!!r&&(n||o())-r>c}}#D=()=>{};#E=()=>{};#H=()=>{};#p=()=>!1;#X(){let t=new W(this.#o);this.#b=0,this.#y=t,this.#C=e=>{this.#b-=t[e],t[e]=0},this.#N=(e,i,s,n)=>{if(!T(s)){if(this.#e(i))return this.backgroundFetchSize;if(n){if(typeof n!="function")throw new TypeError("sizeCalculation must be a function");if(s=n(i,e),!T(s))throw new TypeError("sizeCalculation return invalid (expect positive integer)")}else throw new TypeError("invalid size value (must be positive integer). When maxSize or maxEntrySize is used, sizeCalculation or size must be set.")}return s},this.#I=(e,i,s)=>{if(t[e]=i,this.#c){let n=this.#c-t[e];for(;this.#b>n;)this.#P(!0)}this.#b+=t[e],s&&(s.entrySize=i,s.totalCalculatedSize=this.#b)}}#C=t=>{};#I=(t,e,i)=>{};#N=(t,e,i,s)=>{if(i||s)throw new TypeError("cannot set size without setting maxSize or maxEntrySize on cache");return 0};*#A({allowStale:t=this.allowStale}={}){if(this.#n)for(let e=this.#h;this.#V(e)&&((t||!this.#p(e))&&(yield e),e!==this.#a);)e=this.#u[e]}*#z({allowStale:t=this.allowStale}={}){if(this.#n)for(let e=this.#a;this.#V(e)&&((t||!this.#p(e))&&(yield e),e!==this.#h);)e=this.#l[e]}#V(t){return t!==void 0&&this.#s.get(this.#i[t])===t}*entries(){for(let t of this.#A())this.#t[t]!==void 0&&this.#i[t]!==void 0&&!this.#e(this.#t[t])&&(yield[this.#i[t],this.#t[t]])}*rentries(){for(let t of this.#z())this.#t[t]!==void 0&&this.#i[t]!==void 0&&!this.#e(this.#t[t])&&(yield[this.#i[t],this.#t[t]])}*keys(){for(let t of this.#A()){let e=this.#i[t];e!==void 0&&!this.#e(this.#t[t])&&(yield e)}}*rkeys(){for(let t of this.#z()){let e=this.#i[t];e!==void 0&&!this.#e(this.#t[t])&&(yield e)}}*values(){for(let t of this.#A())this.#t[t]!==void 0&&!this.#e(this.#t[t])&&(yield this.#t[t])}*rvalues(){for(let t of this.#z())this.#t[t]!==void 0&&!this.#e(this.#t[t])&&(yield this.#t[t])}[Symbol.iterator](){return this.entries()}[Symbol.toStringTag]="LRUCache";find(t,e={}){for(let i of this.#A()){let s=this.#t[i],n=this.#e(s)?s.__staleWhileFetching:s;if(n!==void 0&&t(n,this.#i[i],this))return this.#L(this.#i[i],e)}}forEach(t,e=this){for(let i of this.#A()){let s=this.#t[i],n=this.#e(s)?s.__staleWhileFetching:s;n!==void 0&&t.call(e,n,this.#i[i],this)}}rforEach(t,e=this){for(let i of this.#z()){let s=this.#t[i],n=this.#e(s)?s.__staleWhileFetching:s;n!==void 0&&t.call(e,n,this.#i[i],this)}}purgeStale(){let t=!1;for(let e of this.#z({allowStale:!0}))this.#p(e)&&(this.#v(this.#i[e],"expire"),t=!0);return t}info(t){let e=this.#s.get(t);if(e===void 0)return;let i=this.#t[e],s=this.#e(i)?i.__staleWhileFetching:i;if(s===void 0)return;let n={value:s};if(this.#d&&this.#F){let o=this.#d[e],l=this.#F[e];if(o&&l){let h=o-(this.#w.now()-l);n.ttl=h,n.start=Date.now()}}return this.#y&&(n.size=this.#y[e]),n}dump(){let t=[];for(let e of this.#A({allowStale:!0})){let i=this.#i[e],s=this.#t[e],n=this.#e(s)?s.__staleWhileFetching:s;if(n===void 0||i===void 0)continue;let o={value:n};if(this.#d&&this.#F){o.ttl=this.#d[e];let l=this.#w.now()-this.#F[e];o.start=Math.floor(Date.now()-l)}this.#y&&(o.size=this.#y[e]),t.unshift([i,o])}return t}load(t){this.clear();for(let[e,i]of t){if(i.start){let s=Date.now()-i.start;i.start=this.#w.now()-s}this.#O(e,i.value,i)}}set(t,e,i={}){let{status:s=g.metrics.hasSubscribers?{}:void 0}=i;i.status=s,s&&(s.op="set",s.key=t,e!==void 0&&(s.value=e),s.cache=this);let n=this.#O(t,e,i);return s&&g.metrics.hasSubscribers&&g.metrics.publish(s),n}#O(t,e,i,s){let{ttl:n=this.ttl,start:o,noDisposeOnSet:l=this.noDisposeOnSet,sizeCalculation:h=this.sizeCalculation,status:r}=i,c=this.#e(e);if(e===void 0)return r&&(r.set="deleted"),this.delete(t),this;let{noUpdateTTL:w=this.noUpdateTTL}=i;r&&!c&&(r.value=e);let y=this.#N(t,e,i.size||0,h,r);if(this.maxEntrySize&&y>this.maxEntrySize)return this.#v(t,"set"),r&&(r.set="miss",r.maxEntrySizeExceeded=!0),this;let d=this.#n===0?void 0:this.#s.get(t);if(d===void 0)d=this.#n===0?this.#h:this.#_.length!==0?this.#_.pop():this.#n===this.#o?this.#P(!1):this.#n,this.#i[d]=t,this.#t[d]=e,this.#s.set(t,d),this.#l[this.#h]=d,this.#u[d]=this.#h,this.#h=d,this.#n++,this.#I(d,y,r),r&&(r.set="add"),w=!1,this.#R&&!c&&this.#W?.(e,t,"add");else{this.#M(d);let p=this.#t[d];if(e!==p){if(!l)if(this.#e(p)){p!==s&&p.__abortController.abort(new Error("replaced"));let{__staleWhileFetching:f}=p;f!==void 0&&f!==e&&(this.#T&&this.#m?.(f,t,"set"),this.#f&&this.#r?.push([f,t,"set"]))}else this.#T&&this.#m?.(p,t,"set"),this.#f&&this.#r?.push([p,t,"set"]);if(this.#C(d),this.#I(d,y,r),this.#t[d]=e,!c){let f=p&&this.#e(p)?p.__staleWhileFetching:p,_=f===void 0?"add":e!==f?"replace":"update";r&&(r.set=_,f!==void 0&&(r.oldValue=f)),this.#R&&this.onInsert?.(e,t,_)}}else c||(r&&(r.set="update"),this.#R&&this.onInsert?.(e,t,"update"))}if(n!==0&&!this.#d&&this.#k(),this.#d&&(w||this.#H(d,n,o),r&&this.#E(r,d)),!l&&this.#f&&this.#r){let p=this.#r,f;for(;f=p?.shift();)this.#S?.(...f)}return this}pop(){try{for(;this.#n;){let t=this.#t[this.#a];if(this.#P(!0),this.#e(t)){if(t.__staleWhileFetching)return t.__staleWhileFetching}else if(t!==void 0)return t}}finally{if(this.#f&&this.#r){let t=this.#r,e;for(;e=t?.shift();)this.#S?.(...e)}}}#P(t){let e=this.#a,i=this.#i[e],s=this.#t[e],n=this.#e(s);n&&s.__abortController.abort(new Error("evicted"));let o=n?s.__staleWhileFetching:s;return(this.#T||this.#f)&&o!==void 0&&(this.#T&&this.#m?.(o,i,"evict"),this.#f&&this.#r?.push([o,i,"evict"])),this.#C(e),this.#g?.[e]&&(clearTimeout(this.#g[e]),this.#g[e]=void 0),t&&(this.#i[e]=void 0,this.#t[e]=void 0,this.#_.push(e)),this.#n===1?(this.#a=this.#h=0,this.#_.length=0):this.#a=this.#l[e],this.#s.delete(i),this.#n--,e}has(t,e={}){let{status:i=g.metrics.hasSubscribers?{}:void 0}=e;e.status=i,i&&(i.op="has",i.key=t,i.cache=this);let s=this.#Y(t,e);return g.metrics.hasSubscribers&&g.metrics.publish(i),s}#Y(t,e={}){let{updateAgeOnHas:i=this.updateAgeOnHas,status:s}=e,n=this.#s.get(t);if(n!==void 0){let o=this.#t[n];if(this.#e(o)&&o.__staleWhileFetching===void 0)return!1;if(this.#p(n))s&&(s.has="stale",this.#E(s,n));else return i&&this.#D(n),s&&(s.has="hit",this.#E(s,n)),!0}else s&&(s.has="miss");return!1}peek(t,e={}){let{status:i=C()?{}:void 0}=e;i&&(i.op="peek",i.key=t,i.cache=this),e.status=i;let s=this.#J(t,e);return g.metrics.hasSubscribers&&g.metrics.publish(i),s}#J(t,e){let{status:i,allowStale:s=this.allowStale}=e,n=this.#s.get(t);if(n===void 0||!s&&this.#p(n)){i&&(i.peek=n===void 0?"miss":"stale");return}let o=this.#t[n],l=this.#e(o)?o.__staleWhileFetching:o;return i&&(l!==void 0?(i.peek="hit",i.value=l):i.peek="miss"),l}#G(t,e,i,s){let n=e===void 0?void 0:this.#t[e];if(this.#e(n))return n;let o=new AbortController,{signal:l}=i;l?.addEventListener("abort",()=>o.abort(l.reason),{signal:o.signal});let h={signal:o.signal,options:i,context:s},r=(f,_=!1)=>{let{aborted:a}=o.signal,S=i.ignoreFetchAbort&&f!==void 0,F=i.ignoreFetchAbort||!!(i.allowStaleOnFetchAbort&&f!==void 0);if(i.status&&(a&&!_?(i.status.fetchAborted=!0,i.status.fetchError=o.signal.reason,S&&(i.status.fetchAbortIgnored=!0)):i.status.fetchResolved=!0),a&&!S&&!_)return w(o.signal.reason,F);let b=d,m=this.#t[e];return(m===d||m===void 0&&S&&_)&&(f===void 0?b.__staleWhileFetching!==void 0?this.#t[e]=b.__staleWhileFetching:this.#v(t,"fetch"):(i.status&&(i.status.fetchUpdated=!0),this.#O(t,f,h.options,b))),f},c=f=>(i.status&&(i.status.fetchRejected=!0,i.status.fetchError=f),w(f,!1)),w=(f,_)=>{let{aborted:a}=o.signal,S=a&&i.allowStaleOnFetchAbort,F=S||i.allowStaleOnFetchRejection,b=F||i.noDeleteOnFetchRejection,m=d;if(this.#t[e]===d&&(!b||!_&&m.__staleWhileFetching===void 0?this.#v(t,"fetch"):S||(this.#t[e]=m.__staleWhileFetching)),F)return i.status&&m.__staleWhileFetching!==void 0&&(i.status.returnedStale=!0),m.__staleWhileFetching;if(m.__returned===m)throw f},y=(f,_)=>{let a=this.#x?.(t,n,h);o.signal.addEventListener("abort",()=>{(!i.ignoreFetchAbort||i.allowStaleOnFetchAbort)&&(f(void 0),i.allowStaleOnFetchAbort&&(f=S=>r(S,!0)))}),a&&a instanceof Promise?a.then(S=>f(S===void 0?void 0:S),_):a!==void 0&&f(a)};i.status&&(i.status.fetchDispatched=!0);let d=new Promise(y).then(r,c),p=Object.assign(d,{__abortController:o,__staleWhileFetching:n,__returned:void 0});return e===void 0?(this.#O(t,p,{...h.options,status:void 0}),e=this.#s.get(t)):this.#t[e]=p,p}#e(t){if(!this.#U)return!1;let e=t;return!!e&&e instanceof Promise&&e.hasOwnProperty("__staleWhileFetching")&&e.__abortController instanceof AbortController}fetch(t,e={}){let i=g.tracing.hasSubscribers,{status:s=C()?{}:void 0}=e;e.status=s,s&&e.context&&(s.context=e.context);let n=this.#q(t,e);return s&&i&&(s.trace=!0,g.tracing.tracePromise(()=>n,s).catch(()=>{})),n}async#q(t,e={}){let{allowStale:i=this.allowStale,updateAgeOnGet:s=this.updateAgeOnGet,noDeleteOnStaleGet:n=this.noDeleteOnStaleGet,ttl:o=this.ttl,noDisposeOnSet:l=this.noDisposeOnSet,size:h=0,sizeCalculation:r=this.sizeCalculation,noUpdateTTL:c=this.noUpdateTTL,noDeleteOnFetchRejection:w=this.noDeleteOnFetchRejection,allowStaleOnFetchRejection:y=this.allowStaleOnFetchRejection,ignoreFetchAbort:d=this.ignoreFetchAbort,allowStaleOnFetchAbort:p=this.allowStaleOnFetchAbort,context:f,forceRefresh:_=!1,status:a,signal:S}=e;if(a&&(a.op="fetch",a.key=t,_&&(a.forceRefresh=!0),a.cache=this),!this.#U)return a&&(a.fetch="get"),this.#L(t,{allowStale:i,updateAgeOnGet:s,noDeleteOnStaleGet:n,status:a});let F={allowStale:i,updateAgeOnGet:s,noDeleteOnStaleGet:n,ttl:o,noDisposeOnSet:l,size:h,sizeCalculation:r,noUpdateTTL:c,noDeleteOnFetchRejection:w,allowStaleOnFetchRejection:y,allowStaleOnFetchAbort:p,ignoreFetchAbort:d,status:a,signal:S},b=this.#s.get(t);if(b===void 0){a&&(a.fetch="miss");let m=this.#G(t,b,F,f);return m.__returned=m}else{let m=this.#t[b];if(this.#e(m)){let E=i&&m.__staleWhileFetching!==void 0;return a&&(a.fetch="inflight",E&&(a.returnedStale=!0)),E?m.__staleWhileFetching:m.__returned=m}let A=this.#p(b);if(!_&&!A)return a&&(a.fetch="hit"),this.#M(b),s&&this.#D(b),a&&this.#E(a,b),m;let z=this.#G(t,b,F,f),v=z.__staleWhileFetching!==void 0&&i;return a&&(a.fetch=A?"stale":"refresh",v&&A&&(a.returnedStale=!0)),v?z.__staleWhileFetching:z.__returned=z}}forceFetch(t,e={}){let i=g.tracing.hasSubscribers,{status:s=C()?{}:void 0}=e;e.status=s,s&&e.context&&(s.context=e.context);let n=this.#K(t,e);return s&&i&&(s.trace=!0,g.tracing.tracePromise(()=>n,s).catch(()=>{})),n}async#K(t,e={}){let i=await this.#q(t,e);if(i===void 0)throw new Error("fetch() returned undefined");return i}memo(t,e={}){let{status:i=g.metrics.hasSubscribers?{}:void 0}=e;e.status=i,i&&(i.op="memo",i.key=t,e.context&&(i.context=e.context),i.cache=this);let s=this.#Q(t,e);return i&&(i.value=s),g.metrics.hasSubscribers&&g.metrics.publish(i),s}#Q(t,e={}){let i=this.#j;if(!i)throw new Error("no memoMethod provided to constructor");let{context:s,status:n,forceRefresh:o,...l}=e;n&&o&&(n.forceRefresh=!0);let h=this.#L(t,l),r=o||h===void 0;if(n&&(n.memo=r?"miss":"hit",r||(n.value=h)),!r)return h;let c=i(t,h,{options:l,context:s});return n&&(n.value=c),this.#O(t,c,l),c}get(t,e={}){let{status:i=g.metrics.hasSubscribers?{}:void 0}=e;e.status=i,i&&(i.op="get",i.key=t,i.cache=this);let s=this.#L(t,e);return i&&(s!==void 0&&(i.value=s),g.metrics.hasSubscribers&&g.metrics.publish(i)),s}#L(t,e={}){let{allowStale:i=this.allowStale,updateAgeOnGet:s=this.updateAgeOnGet,noDeleteOnStaleGet:n=this.noDeleteOnStaleGet,status:o}=e,l=this.#s.get(t);if(l===void 0){o&&(o.get="miss");return}let h=this.#t[l],r=this.#e(h);return o&&this.#E(o,l),this.#p(l)?r?(o&&(o.get="stale-fetching"),i&&h.__staleWhileFetching!==void 0?(o&&(o.returnedStale=!0),h.__staleWhileFetching):void 0):(n||this.#v(t,"expire"),o&&(o.get="stale"),i?(o&&(o.returnedStale=!0),h):void 0):(o&&(o.get=r?"fetching":"hit"),this.#M(l),s&&this.#D(l),r?h.__staleWhileFetching:h)}#B(t,e){this.#u[e]=t,this.#l[t]=e}#M(t){t!==this.#h&&(t===this.#a?this.#a=this.#l[t]:this.#B(this.#u[t],this.#l[t]),this.#B(this.#h,t),this.#h=t)}delete(t){return this.#v(t,"delete")}#v(t,e){g.metrics.hasSubscribers&&g.metrics.publish({op:"delete",delete:e,key:t,cache:this});let i=!1;if(this.#n!==0){let s=this.#s.get(t);if(s!==void 0)if(this.#g?.[s]&&(clearTimeout(this.#g[s]),this.#g[s]=void 0),i=!0,this.#n===1)this.#$(e);else{this.#C(s);let n=this.#t[s];if(this.#e(n)?n.__abortController.abort(new Error("deleted")):(this.#T||this.#f)&&(this.#T&&this.#m?.(n,t,e),this.#f&&this.#r?.push([n,t,e])),this.#s.delete(t),this.#i[s]=void 0,this.#t[s]=void 0,s===this.#h)this.#h=this.#u[s];else if(s===this.#a)this.#a=this.#l[s];else{let o=this.#u[s];this.#l[o]=this.#l[s];let l=this.#l[s];this.#u[l]=this.#u[s]}this.#n--,this.#_.push(s)}}if(this.#f&&this.#r?.length){let s=this.#r,n;for(;n=s?.shift();)this.#S?.(...n)}return i}clear(){return this.#$("delete")}#$(t){for(let e of this.#z({allowStale:!0})){let i=this.#t[e];if(this.#e(i))i.__abortController.abort(new Error("deleted"));else{let s=this.#i[e];this.#T&&this.#m?.(i,s,t),this.#f&&this.#r?.push([i,s,t])}}if(this.#s.clear(),this.#t.fill(void 0),this.#i.fill(void 0),this.#d&&this.#F){this.#d.fill(0),this.#F.fill(0);for(let e of this.#g??[])e!==void 0&&clearTimeout(e);this.#g?.fill(void 0)}if(this.#y&&this.#y.fill(0),this.#a=0,this.#h=0,this.#_.length=0,this.#b=0,this.#n=0,this.#f&&this.#r){let e=this.#r,i;for(;i=e?.shift();)this.#S?.(...i)}}};exports.LRUCache=M;
+//# sourceMappingURL=index.min.js.map
+
+
+/***/ }),
+
+/***/ 5270:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
-Object.defineProperty(exports, "__esModule", ({value:!0}));exports.LRUCache=void 0;var x=typeof performance=="object"&&performance&&typeof performance.now=="function"?performance:Date,U=new Set,R=typeof process=="object"&&process?process:{},I=(a,t,e,i)=>{typeof R.emitWarning=="function"?R.emitWarning(a,t,e,i):console.error(`[${e}] ${t}: ${a}`)},C=globalThis.AbortController,L=globalThis.AbortSignal;if(typeof C>"u"){L=class{onabort;_onabort=[];reason;aborted=!1;addEventListener(i,s){this._onabort.push(s)}},C=class{constructor(){t()}signal=new L;abort(i){if(!this.signal.aborted){this.signal.reason=i,this.signal.aborted=!0;for(let s of this.signal._onabort)s(i);this.signal.onabort?.(i)}}};let a=R.env?.LRU_CACHE_IGNORE_AC_WARNING!=="1",t=()=>{a&&(a=!1,I("AbortController is not defined. If using lru-cache in node 14, load an AbortController polyfill from the `node-abort-controller` package. A minimal polyfill is provided for use by LRUCache.fetch(), but it should not be relied upon in other contexts (eg, passing it to other APIs that use AbortController/AbortSignal might have undesirable effects). You may disable this with LRU_CACHE_IGNORE_AC_WARNING=1 in the env.","NO_ABORT_CONTROLLER","ENOTSUP",t))}}var G=a=>!U.has(a),H=Symbol("type"),y=a=>a&&a===Math.floor(a)&&a>0&&isFinite(a),M=a=>y(a)?a<=Math.pow(2,8)?Uint8Array:a<=Math.pow(2,16)?Uint16Array:a<=Math.pow(2,32)?Uint32Array:a<=Number.MAX_SAFE_INTEGER?z:null:null,z=class extends Array{constructor(t){super(t),this.fill(0)}},W=class a{heap;length;static#o=!1;static create(t){let e=M(t);if(!e)return[];a.#o=!0;let i=new a(t,e);return a.#o=!1,i}constructor(t,e){if(!a.#o)throw new TypeError("instantiate Stack using Stack.create(n)");this.heap=new e(t),this.length=0}push(t){this.heap[this.length++]=t}pop(){return this.heap[--this.length]}},D=class a{#o;#c;#w;#C;#S;#L;#U;#m;get perf(){return this.#m}ttl;ttlResolution;ttlAutopurge;updateAgeOnGet;updateAgeOnHas;allowStale;noDisposeOnSet;noUpdateTTL;maxEntrySize;sizeCalculation;noDeleteOnFetchRejection;noDeleteOnStaleGet;allowStaleOnFetchAbort;allowStaleOnFetchRejection;ignoreFetchAbort;#n;#_;#s;#i;#t;#a;#u;#l;#h;#b;#r;#y;#A;#d;#g;#T;#v;#f;#I;static unsafeExposeInternals(t){return{starts:t.#A,ttls:t.#d,autopurgeTimers:t.#g,sizes:t.#y,keyMap:t.#s,keyList:t.#i,valList:t.#t,next:t.#a,prev:t.#u,get head(){return t.#l},get tail(){return t.#h},free:t.#b,isBackgroundFetch:e=>t.#e(e),backgroundFetch:(e,i,s,h)=>t.#G(e,i,s,h),moveToTail:e=>t.#D(e),indexes:e=>t.#F(e),rindexes:e=>t.#O(e),isStale:e=>t.#p(e)}}get max(){return this.#o}get maxSize(){return this.#c}get calculatedSize(){return this.#_}get size(){return this.#n}get fetchMethod(){return this.#L}get memoMethod(){return this.#U}get dispose(){return this.#w}get onInsert(){return this.#C}get disposeAfter(){return this.#S}constructor(t){let{max:e=0,ttl:i,ttlResolution:s=1,ttlAutopurge:h,updateAgeOnGet:n,updateAgeOnHas:o,allowStale:r,dispose:f,onInsert:m,disposeAfter:c,noDisposeOnSet:d,noUpdateTTL:g,maxSize:A=0,maxEntrySize:p=0,sizeCalculation:_,fetchMethod:l,memoMethod:w,noDeleteOnFetchRejection:b,noDeleteOnStaleGet:S,allowStaleOnFetchRejection:u,allowStaleOnFetchAbort:T,ignoreFetchAbort:F,perf:v}=t;if(v!==void 0&&typeof v?.now!="function")throw new TypeError("perf option must have a now() method if specified");if(this.#m=v??x,e!==0&&!y(e))throw new TypeError("max option must be a nonnegative integer");let O=e?M(e):Array;if(!O)throw new Error("invalid max value: "+e);if(this.#o=e,this.#c=A,this.maxEntrySize=p||this.#c,this.sizeCalculation=_,this.sizeCalculation){if(!this.#c&&!this.maxEntrySize)throw new TypeError("cannot set sizeCalculation without setting maxSize or maxEntrySize");if(typeof this.sizeCalculation!="function")throw new TypeError("sizeCalculation set to non-function")}if(w!==void 0&&typeof w!="function")throw new TypeError("memoMethod must be a function if defined");if(this.#U=w,l!==void 0&&typeof l!="function")throw new TypeError("fetchMethod must be a function if specified");if(this.#L=l,this.#v=!!l,this.#s=new Map,this.#i=new Array(e).fill(void 0),this.#t=new Array(e).fill(void 0),this.#a=new O(e),this.#u=new O(e),this.#l=0,this.#h=0,this.#b=W.create(e),this.#n=0,this.#_=0,typeof f=="function"&&(this.#w=f),typeof m=="function"&&(this.#C=m),typeof c=="function"?(this.#S=c,this.#r=[]):(this.#S=void 0,this.#r=void 0),this.#T=!!this.#w,this.#I=!!this.#C,this.#f=!!this.#S,this.noDisposeOnSet=!!d,this.noUpdateTTL=!!g,this.noDeleteOnFetchRejection=!!b,this.allowStaleOnFetchRejection=!!u,this.allowStaleOnFetchAbort=!!T,this.ignoreFetchAbort=!!F,this.maxEntrySize!==0){if(this.#c!==0&&!y(this.#c))throw new TypeError("maxSize must be a positive integer if specified");if(!y(this.maxEntrySize))throw new TypeError("maxEntrySize must be a positive integer if specified");this.#B()}if(this.allowStale=!!r,this.noDeleteOnStaleGet=!!S,this.updateAgeOnGet=!!n,this.updateAgeOnHas=!!o,this.ttlResolution=y(s)||s===0?s:1,this.ttlAutopurge=!!h,this.ttl=i||0,this.ttl){if(!y(this.ttl))throw new TypeError("ttl must be a positive integer if specified");this.#j()}if(this.#o===0&&this.ttl===0&&this.#c===0)throw new TypeError("At least one of max, maxSize, or ttl is required");if(!this.ttlAutopurge&&!this.#o&&!this.#c){let E="LRU_CACHE_UNBOUNDED";G(E)&&(U.add(E),I("TTL caching without ttlAutopurge, max, or maxSize can result in unbounded memory consumption.","UnboundedCacheWarning",E,a))}}getRemainingTTL(t){return this.#s.has(t)?1/0:0}#j(){let t=new z(this.#o),e=new z(this.#o);this.#d=t,this.#A=e;let i=this.ttlAutopurge?new Array(this.#o):void 0;this.#g=i,this.#N=(n,o,r=this.#m.now())=>{if(e[n]=o!==0?r:0,t[n]=o,i?.[n]&&(clearTimeout(i[n]),i[n]=void 0),o!==0&&i){let f=setTimeout(()=>{this.#p(n)&&this.#E(this.#i[n],"expire")},o+1);f.unref&&f.unref(),i[n]=f}},this.#R=n=>{e[n]=t[n]!==0?this.#m.now():0},this.#z=(n,o)=>{if(t[o]){let r=t[o],f=e[o];if(!r||!f)return;n.ttl=r,n.start=f,n.now=s||h();let m=n.now-f;n.remainingTTL=r-m}};let s=0,h=()=>{let n=this.#m.now();if(this.ttlResolution>0){s=n;let o=setTimeout(()=>s=0,this.ttlResolution);o.unref&&o.unref()}return n};this.getRemainingTTL=n=>{let o=this.#s.get(n);if(o===void 0)return 0;let r=t[o],f=e[o];if(!r||!f)return 1/0;let m=(s||h())-f;return r-m},this.#p=n=>{let o=e[n],r=t[n];return!!r&&!!o&&(s||h())-o>r}}#R=()=>{};#z=()=>{};#N=()=>{};#p=()=>!1;#B(){let t=new z(this.#o);this.#_=0,this.#y=t,this.#W=e=>{this.#_-=t[e],t[e]=0},this.#P=(e,i,s,h)=>{if(this.#e(i))return 0;if(!y(s))if(h){if(typeof h!="function")throw new TypeError("sizeCalculation must be a function");if(s=h(i,e),!y(s))throw new TypeError("sizeCalculation return invalid (expect positive integer)")}else throw new TypeError("invalid size value (must be positive integer). When maxSize or maxEntrySize is used, sizeCalculation or size must be set.");return s},this.#M=(e,i,s)=>{if(t[e]=i,this.#c){let h=this.#c-t[e];for(;this.#_>h;)this.#x(!0)}this.#_+=t[e],s&&(s.entrySize=i,s.totalCalculatedSize=this.#_)}}#W=t=>{};#M=(t,e,i)=>{};#P=(t,e,i,s)=>{if(i||s)throw new TypeError("cannot set size without setting maxSize or maxEntrySize on cache");return 0};*#F({allowStale:t=this.allowStale}={}){if(this.#n)for(let e=this.#h;!(!this.#H(e)||((t||!this.#p(e))&&(yield e),e===this.#l));)e=this.#u[e]}*#O({allowStale:t=this.allowStale}={}){if(this.#n)for(let e=this.#l;!(!this.#H(e)||((t||!this.#p(e))&&(yield e),e===this.#h));)e=this.#a[e]}#H(t){return t!==void 0&&this.#s.get(this.#i[t])===t}*entries(){for(let t of this.#F())this.#t[t]!==void 0&&this.#i[t]!==void 0&&!this.#e(this.#t[t])&&(yield[this.#i[t],this.#t[t]])}*rentries(){for(let t of this.#O())this.#t[t]!==void 0&&this.#i[t]!==void 0&&!this.#e(this.#t[t])&&(yield[this.#i[t],this.#t[t]])}*keys(){for(let t of this.#F()){let e=this.#i[t];e!==void 0&&!this.#e(this.#t[t])&&(yield e)}}*rkeys(){for(let t of this.#O()){let e=this.#i[t];e!==void 0&&!this.#e(this.#t[t])&&(yield e)}}*values(){for(let t of this.#F())this.#t[t]!==void 0&&!this.#e(this.#t[t])&&(yield this.#t[t])}*rvalues(){for(let t of this.#O())this.#t[t]!==void 0&&!this.#e(this.#t[t])&&(yield this.#t[t])}[Symbol.iterator](){return this.entries()}[Symbol.toStringTag]="LRUCache";find(t,e={}){for(let i of this.#F()){let s=this.#t[i],h=this.#e(s)?s.__staleWhileFetching:s;if(h!==void 0&&t(h,this.#i[i],this))return this.get(this.#i[i],e)}}forEach(t,e=this){for(let i of this.#F()){let s=this.#t[i],h=this.#e(s)?s.__staleWhileFetching:s;h!==void 0&&t.call(e,h,this.#i[i],this)}}rforEach(t,e=this){for(let i of this.#O()){let s=this.#t[i],h=this.#e(s)?s.__staleWhileFetching:s;h!==void 0&&t.call(e,h,this.#i[i],this)}}purgeStale(){let t=!1;for(let e of this.#O({allowStale:!0}))this.#p(e)&&(this.#E(this.#i[e],"expire"),t=!0);return t}info(t){let e=this.#s.get(t);if(e===void 0)return;let i=this.#t[e],s=this.#e(i)?i.__staleWhileFetching:i;if(s===void 0)return;let h={value:s};if(this.#d&&this.#A){let n=this.#d[e],o=this.#A[e];if(n&&o){let r=n-(this.#m.now()-o);h.ttl=r,h.start=Date.now()}}return this.#y&&(h.size=this.#y[e]),h}dump(){let t=[];for(let e of this.#F({allowStale:!0})){let i=this.#i[e],s=this.#t[e],h=this.#e(s)?s.__staleWhileFetching:s;if(h===void 0||i===void 0)continue;let n={value:h};if(this.#d&&this.#A){n.ttl=this.#d[e];let o=this.#m.now()-this.#A[e];n.start=Math.floor(Date.now()-o)}this.#y&&(n.size=this.#y[e]),t.unshift([i,n])}return t}load(t){this.clear();for(let[e,i]of t){if(i.start){let s=Date.now()-i.start;i.start=this.#m.now()-s}this.set(e,i.value,i)}}set(t,e,i={}){if(e===void 0)return this.delete(t),this;let{ttl:s=this.ttl,start:h,noDisposeOnSet:n=this.noDisposeOnSet,sizeCalculation:o=this.sizeCalculation,status:r}=i,{noUpdateTTL:f=this.noUpdateTTL}=i,m=this.#P(t,e,i.size||0,o);if(this.maxEntrySize&&m>this.maxEntrySize)return r&&(r.set="miss",r.maxEntrySizeExceeded=!0),this.#E(t,"set"),this;let c=this.#n===0?void 0:this.#s.get(t);if(c===void 0)c=this.#n===0?this.#h:this.#b.length!==0?this.#b.pop():this.#n===this.#o?this.#x(!1):this.#n,this.#i[c]=t,this.#t[c]=e,this.#s.set(t,c),this.#a[this.#h]=c,this.#u[c]=this.#h,this.#h=c,this.#n++,this.#M(c,m,r),r&&(r.set="add"),f=!1,this.#I&&this.#C?.(e,t,"add");else{this.#D(c);let d=this.#t[c];if(e!==d){if(this.#v&&this.#e(d)){d.__abortController.abort(new Error("replaced"));let{__staleWhileFetching:g}=d;g!==void 0&&!n&&(this.#T&&this.#w?.(g,t,"set"),this.#f&&this.#r?.push([g,t,"set"]))}else n||(this.#T&&this.#w?.(d,t,"set"),this.#f&&this.#r?.push([d,t,"set"]));if(this.#W(c),this.#M(c,m,r),this.#t[c]=e,r){r.set="replace";let g=d&&this.#e(d)?d.__staleWhileFetching:d;g!==void 0&&(r.oldValue=g)}}else r&&(r.set="update");this.#I&&this.onInsert?.(e,t,e===d?"update":"replace")}if(s!==0&&!this.#d&&this.#j(),this.#d&&(f||this.#N(c,s,h),r&&this.#z(r,c)),!n&&this.#f&&this.#r){let d=this.#r,g;for(;g=d?.shift();)this.#S?.(...g)}return this}pop(){try{for(;this.#n;){let t=this.#t[this.#l];if(this.#x(!0),this.#e(t)){if(t.__staleWhileFetching)return t.__staleWhileFetching}else if(t!==void 0)return t}}finally{if(this.#f&&this.#r){let t=this.#r,e;for(;e=t?.shift();)this.#S?.(...e)}}}#x(t){let e=this.#l,i=this.#i[e],s=this.#t[e];return this.#v&&this.#e(s)?s.__abortController.abort(new Error("evicted")):(this.#T||this.#f)&&(this.#T&&this.#w?.(s,i,"evict"),this.#f&&this.#r?.push([s,i,"evict"])),this.#W(e),this.#g?.[e]&&(clearTimeout(this.#g[e]),this.#g[e]=void 0),t&&(this.#i[e]=void 0,this.#t[e]=void 0,this.#b.push(e)),this.#n===1?(this.#l=this.#h=0,this.#b.length=0):this.#l=this.#a[e],this.#s.delete(i),this.#n--,e}has(t,e={}){let{updateAgeOnHas:i=this.updateAgeOnHas,status:s}=e,h=this.#s.get(t);if(h!==void 0){let n=this.#t[h];if(this.#e(n)&&n.__staleWhileFetching===void 0)return!1;if(this.#p(h))s&&(s.has="stale",this.#z(s,h));else return i&&this.#R(h),s&&(s.has="hit",this.#z(s,h)),!0}else s&&(s.has="miss");return!1}peek(t,e={}){let{allowStale:i=this.allowStale}=e,s=this.#s.get(t);if(s===void 0||!i&&this.#p(s))return;let h=this.#t[s];return this.#e(h)?h.__staleWhileFetching:h}#G(t,e,i,s){let h=e===void 0?void 0:this.#t[e];if(this.#e(h))return h;let n=new C,{signal:o}=i;o?.addEventListener("abort",()=>n.abort(o.reason),{signal:n.signal});let r={signal:n.signal,options:i,context:s},f=(p,_=!1)=>{let{aborted:l}=n.signal,w=i.ignoreFetchAbort&&p!==void 0,b=i.ignoreFetchAbort||!!(i.allowStaleOnFetchAbort&&p!==void 0);if(i.status&&(l&&!_?(i.status.fetchAborted=!0,i.status.fetchError=n.signal.reason,w&&(i.status.fetchAbortIgnored=!0)):i.status.fetchResolved=!0),l&&!w&&!_)return c(n.signal.reason,b);let S=g,u=this.#t[e];return(u===g||w&&_&&u===void 0)&&(p===void 0?S.__staleWhileFetching!==void 0?this.#t[e]=S.__staleWhileFetching:this.#E(t,"fetch"):(i.status&&(i.status.fetchUpdated=!0),this.set(t,p,r.options))),p},m=p=>(i.status&&(i.status.fetchRejected=!0,i.status.fetchError=p),c(p,!1)),c=(p,_)=>{let{aborted:l}=n.signal,w=l&&i.allowStaleOnFetchAbort,b=w||i.allowStaleOnFetchRejection,S=b||i.noDeleteOnFetchRejection,u=g;if(this.#t[e]===g&&(!S||!_&&u.__staleWhileFetching===void 0?this.#E(t,"fetch"):w||(this.#t[e]=u.__staleWhileFetching)),b)return i.status&&u.__staleWhileFetching!==void 0&&(i.status.returnedStale=!0),u.__staleWhileFetching;if(u.__returned===u)throw p},d=(p,_)=>{let l=this.#L?.(t,h,r);l&&l instanceof Promise&&l.then(w=>p(w===void 0?void 0:w),_),n.signal.addEventListener("abort",()=>{(!i.ignoreFetchAbort||i.allowStaleOnFetchAbort)&&(p(void 0),i.allowStaleOnFetchAbort&&(p=w=>f(w,!0)))})};i.status&&(i.status.fetchDispatched=!0);let g=new Promise(d).then(f,m),A=Object.assign(g,{__abortController:n,__staleWhileFetching:h,__returned:void 0});return e===void 0?(this.set(t,A,{...r.options,status:void 0}),e=this.#s.get(t)):this.#t[e]=A,A}#e(t){if(!this.#v)return!1;let e=t;return!!e&&e instanceof Promise&&e.hasOwnProperty("__staleWhileFetching")&&e.__abortController instanceof C}async fetch(t,e={}){let{allowStale:i=this.allowStale,updateAgeOnGet:s=this.updateAgeOnGet,noDeleteOnStaleGet:h=this.noDeleteOnStaleGet,ttl:n=this.ttl,noDisposeOnSet:o=this.noDisposeOnSet,size:r=0,sizeCalculation:f=this.sizeCalculation,noUpdateTTL:m=this.noUpdateTTL,noDeleteOnFetchRejection:c=this.noDeleteOnFetchRejection,allowStaleOnFetchRejection:d=this.allowStaleOnFetchRejection,ignoreFetchAbort:g=this.ignoreFetchAbort,allowStaleOnFetchAbort:A=this.allowStaleOnFetchAbort,context:p,forceRefresh:_=!1,status:l,signal:w}=e;if(!this.#v)return l&&(l.fetch="get"),this.get(t,{allowStale:i,updateAgeOnGet:s,noDeleteOnStaleGet:h,status:l});let b={allowStale:i,updateAgeOnGet:s,noDeleteOnStaleGet:h,ttl:n,noDisposeOnSet:o,size:r,sizeCalculation:f,noUpdateTTL:m,noDeleteOnFetchRejection:c,allowStaleOnFetchRejection:d,allowStaleOnFetchAbort:A,ignoreFetchAbort:g,status:l,signal:w},S=this.#s.get(t);if(S===void 0){l&&(l.fetch="miss");let u=this.#G(t,S,b,p);return u.__returned=u}else{let u=this.#t[S];if(this.#e(u)){let E=i&&u.__staleWhileFetching!==void 0;return l&&(l.fetch="inflight",E&&(l.returnedStale=!0)),E?u.__staleWhileFetching:u.__returned=u}let T=this.#p(S);if(!_&&!T)return l&&(l.fetch="hit"),this.#D(S),s&&this.#R(S),l&&this.#z(l,S),u;let F=this.#G(t,S,b,p),O=F.__staleWhileFetching!==void 0&&i;return l&&(l.fetch=T?"stale":"refresh",O&&T&&(l.returnedStale=!0)),O?F.__staleWhileFetching:F.__returned=F}}async forceFetch(t,e={}){let i=await this.fetch(t,e);if(i===void 0)throw new Error("fetch() returned undefined");return i}memo(t,e={}){let i=this.#U;if(!i)throw new Error("no memoMethod provided to constructor");let{context:s,forceRefresh:h,...n}=e,o=this.get(t,n);if(!h&&o!==void 0)return o;let r=i(t,o,{options:n,context:s});return this.set(t,r,n),r}get(t,e={}){let{allowStale:i=this.allowStale,updateAgeOnGet:s=this.updateAgeOnGet,noDeleteOnStaleGet:h=this.noDeleteOnStaleGet,status:n}=e,o=this.#s.get(t);if(o!==void 0){let r=this.#t[o],f=this.#e(r);return n&&this.#z(n,o),this.#p(o)?(n&&(n.get="stale"),f?(n&&i&&r.__staleWhileFetching!==void 0&&(n.returnedStale=!0),i?r.__staleWhileFetching:void 0):(h||this.#E(t,"expire"),n&&i&&(n.returnedStale=!0),i?r:void 0)):(n&&(n.get="hit"),f?r.__staleWhileFetching:(this.#D(o),s&&this.#R(o),r))}else n&&(n.get="miss")}#k(t,e){this.#u[e]=t,this.#a[t]=e}#D(t){t!==this.#h&&(t===this.#l?this.#l=this.#a[t]:this.#k(this.#u[t],this.#a[t]),this.#k(this.#h,t),this.#h=t)}delete(t){return this.#E(t,"delete")}#E(t,e){let i=!1;if(this.#n!==0){let s=this.#s.get(t);if(s!==void 0)if(this.#g?.[s]&&(clearTimeout(this.#g?.[s]),this.#g[s]=void 0),i=!0,this.#n===1)this.#V(e);else{this.#W(s);let h=this.#t[s];if(this.#e(h)?h.__abortController.abort(new Error("deleted")):(this.#T||this.#f)&&(this.#T&&this.#w?.(h,t,e),this.#f&&this.#r?.push([h,t,e])),this.#s.delete(t),this.#i[s]=void 0,this.#t[s]=void 0,s===this.#h)this.#h=this.#u[s];else if(s===this.#l)this.#l=this.#a[s];else{let n=this.#u[s];this.#a[n]=this.#a[s];let o=this.#a[s];this.#u[o]=this.#u[s]}this.#n--,this.#b.push(s)}}if(this.#f&&this.#r?.length){let s=this.#r,h;for(;h=s?.shift();)this.#S?.(...h)}return i}clear(){return this.#V("delete")}#V(t){for(let e of this.#O({allowStale:!0})){let i=this.#t[e];if(this.#e(i))i.__abortController.abort(new Error("deleted"));else{let s=this.#i[e];this.#T&&this.#w?.(i,s,t),this.#f&&this.#r?.push([i,s,t])}}if(this.#s.clear(),this.#t.fill(void 0),this.#i.fill(void 0),this.#d&&this.#A){this.#d.fill(0),this.#A.fill(0);for(let e of this.#g??[])e!==void 0&&clearTimeout(e);this.#g?.fill(void 0)}if(this.#y&&this.#y.fill(0),this.#l=0,this.#h=0,this.#b.length=0,this.#_=0,this.#n=0,this.#f&&this.#r){let e=this.#r,i;for(;i=e?.shift();)this.#S?.(...i)}}};exports.LRUCache=D;
-//# sourceMappingURL=index.min.js.map
+Object.defineProperty(exports,Symbol.toStringTag,{value:"Module"});const e=new WeakMap;function c(...t){const n=new String(t);return e.set(n,t),n}function o(t){return t instanceof String&&e.has(t)}function r(t){return e.get(t)??[]}exports.isPathSpec=o;exports.pathspec=c;exports.toPaths=r;
+//# sourceMappingURL=index.cjs.map
+
+
+/***/ }),
+
+/***/ 7574:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+Object.defineProperty(exports,Symbol.toStringTag,{value:"Module"});const h=__nccwpck_require__(5270);function*v(e,t){const n=t==="global";for(const o of e)o.isGlobal===n&&(yield o)}const S=new Set(["--add","--edit","--remove-section","--rename-section","--replace-all","--unset","--unset-all","-e"]),P=new Set(["--get","--get-all","--get-color","--get-colorbool","--get-regexp","--get-urlmatch","--list","-l"]),E=new Set(["edit","remove-section","rename-section","set","unset"]),A=new Set(["get","get-color","get-colorbool","list"]);function F(e,t){for(const{name:o}of v(e,"task")){if(S.has(o))return p(!0,t);if(P.has(o))return p(!1,t)}const n=t.at(0)?.toLowerCase();return n===void 0?null:E.has(n)?p(!0,t.slice(1)):A.has(n)?p(!1,t.slice(1)):t.length===1?p(!1,t):p(!0,t)}function p(e=!1,t=[]){const n=t.at(0)?.toLowerCase();return n===void 0?null:{isWrite:e,isRead:!e,key:n,value:t.at(1)}}function M(e,t){return t.isWrite&&t.value!==void 0?{key:t.key,value:t.value,scope:e}:{key:t.key,scope:e}}function N(e){const t=e?.indexOf("=")||-1;return!e||t<0?null:{key:e.slice(0,t).trim().toLowerCase(),value:e.slice(t+1)}}function O(e){for(const{name:t}of v(e,"task"))switch(t){case"--global":return"global";case"--system":return"system";case"--worktree":return"worktree";case"--local":return"local";case"--file":case"-f":return"file"}return"local"}function G({name:e}){if(e==="-c"||e==="--config")return"inline";if(e==="--config-env")return"env"}function*L(e){for(const t of e){const n=G(t),o=n&&N(t.value);o&&(yield{...o,scope:n})}}function $(e,t,n){const o={read:[],write:[...L(t)]};return e==="config"&&D(o,O(t),F(t,n)),o}function D(e,t,n){if(n===null)return;const o=M(t,n);n.isWrite?e.write.push(o):e.read.push(o)}const U={short:new Map([["c",!0]])},T={short:new Map([["C",!0],["P",!1],["h",!1],["p",!1],["v",!1],...U.short.entries()]),long:new Set(["attr-source","config-env","exec-path","git-dir","list-cmds","namespace","super-prefix","work-tree"])},R={clone:{short:new Map([["b",!0],["j",!0],["l",!1],["n",!1],["o",!0],["q",!1],["s",!1],["u",!0]]),long:new Set(["branch","config","jobs","origin","upload-pack","u","template"])},commit:{short:new Map([["C",!0],["F",!0],["c",!0],["m",!0],["t",!0]]),long:new Set(["file","message","reedit-message","reuse-message","template"])},config:{short:new Map([["e",!1],["f",!0],["l",!1]]),long:new Set(["blob","comment","default","file","type","value"])},fetch:{short:new Map,long:new Set(["upload-pack"])},init:{short:new Map,long:new Set(["template"])},pull:{short:new Map,long:new Set(["upload-pack"])},push:{short:new Map,long:new Set(["exec","receive-pack"])}},I={short:new Map,long:new Set};function j(e){const t=R[e??""]??I;return{short:new Map([...U.short.entries(),...t.short.entries()]),long:t.long}}function b(e,t=T){if(e.startsWith("--")){const n=e.indexOf("=");if(n>2)return[{name:e.slice(0,n),value:e.slice(n+1),needsNext:!1}];const o=e.slice(2);return[{name:e,needsNext:t.long.has(o)}]}if(e.length===2){const n=e.charAt(1),o=t.short.get(n);return[{name:e,needsNext:o===!0}]}return W(e,t.short)}function W(e,t){const n=e.slice(1).split(""),o=[];for(let s=0;s<n.length;s++){const r=n[s],a=t.get(r);if(a===void 0)return[{name:e,needsNext:!1}];if(a){const l=n.slice(s+1).join("");if(l&&![...l].every(m=>t.has(m)))return o.push({name:`-${r}`,value:l,needsNext:!1}),o}o.push({name:`-${r}`,needsNext:a})}return o}function B(e,t=[]){let n=0;for(;n<e.length;){const o=String(e[n]);if(!o.startsWith("-")||o.length<2)break;const s=b(o);let r=n+1;for(const a of s){const l={name:a.name,value:a.value,absorbedNext:!1,isGlobal:!0};a.needsNext&&l.value===void 0&&r<e.length&&(l.value=String(e[r]),l.absorbedNext=!0,r++),t.push(l)}n=r}return{flags:t,taskIndex:n}}function q(e,t,n=[]){const o=j(t),s=[],r=[];let a=0;for(;a<e.length;){const l=e[a];if(h.isPathSpec(l)){r.push(...h.toPaths(l)),a++;continue}const f=String(l);if(f==="--"){for(let g=a+1;g<e.length;g++){const u=e[g];h.isPathSpec(u)?r.push(...h.toPaths(u)):r.push(String(u))}break}if(!f.startsWith("-")||f.length<2){s.push(f),a++;continue}const m=b(f,o);let d=a+1;for(const g of m){const u={name:g.name,value:g.value,absorbedNext:!1,isGlobal:!1};g.needsNext&&u.value===void 0&&d<e.length&&!h.isPathSpec(e[d])&&(u.value=String(e[d]),u.absorbedNext=!0,d++),n.push(u)}a=d}return{flags:n,positionals:s,pathspecs:r}}function*V({write:e}){for(const t of e)for(const n of K){const o=n(t.key);o&&(yield o)}}function c(e,t,n=String(e)){const o=typeof e=="string"?new RegExp(`\\s*${e.toLowerCase()}`):e;return function(r){if(o.test(r))return{category:t,message:`Configuring ${n} is not permitted without enabling ${t}`}}}function i(e,t){const n=new RegExp(`\\s*${e.toLowerCase().replace(/\./g,"(..+)?.")}`);return c(n,t,e)}const K=[c("alias","allowUnsafeAlias"),c("core.askPass","allowUnsafeAskPass"),c("core.editor","allowUnsafeEditor"),c("core.fsmonitor","allowUnsafeFsMonitor"),c("core.gitProxy","allowUnsafeGitProxy"),c("core.hooksPath","allowUnsafeHooksPath"),c("core.pager","allowUnsafePager"),c("core.sshCommand","allowUnsafeSshCommand"),i("credential.helper","allowUnsafeCredentialHelper"),i("diff.command","allowUnsafeDiffExternal"),c("diff.external","allowUnsafeDiffExternal"),i("diff.textconv","allowUnsafeDiffTextConv"),i("filter.clean","allowUnsafeFilter"),i("filter.smudge","allowUnsafeFilter"),i("gpg.program","allowUnsafeGpgProgram"),c("init.templateDir","allowUnsafeTemplateDir"),i("merge.driver","allowUnsafeMergeDriver"),i("mergetool.path","allowUnsafeMergeDriver"),i("mergetool.cmd","allowUnsafeMergeDriver"),i("protocol.allow","allowUnsafeProtocolOverride"),i("remote.receivepack","allowUnsafePack"),i("remote.uploadpack","allowUnsafePack"),c("sequence.editor","allowUnsafeEditor")];function*H(e,t){for(const n of t)for(const o of Y){const s=o(e,n.name);s&&(yield s)}}function w(e,t,n,o=String(t)){const s=typeof t=="string"?new RegExp(`\\s*${t.toLowerCase()}`):t,r=`Use of ${e?`${e} with option `:""}${o} is not permitted without enabling ${n}`;return function(l,f){if((!e||l===e)&&s.test(f))return{category:n,message:r}}}const Y=[w(null,/--(upload|receive)-pack/,"allowUnsafePack","--upload-pack or --receive-pack"),w("clone",/^-\w*u/,"allowUnsafePack"),w("clone","--u","allowUnsafePack"),w("push","--exec","allowUnsafePack"),w(null,"--template","allowUnsafeTemplateDir")];function C(e,t,n){return[...H(e,t),...V(n)]}function x(...e){const{flags:t,taskIndex:n}=B(e),o=n<e.length?String(e[n]).toLowerCase():null,s=o!==null?e.slice(n+1):[],{positionals:r,pathspecs:a}=q(s,o,t),l=$(o,t,r);return{task:o,flags:t.map(J),paths:a,config:l,vulnerabilities:z(C(o,t,l))}}function z(e){return Object.defineProperty(e,"vulnerabilities",{value:e})}function J({value:e,name:t}){return e!==void 0?{name:t,value:e}:{name:t}}const y={editor:"allowUnsafeEditor",git_askpass:"allowUnsafeAskPass",git_config_global:"allowUnsafeConfigPaths",git_config_system:"allowUnsafeConfigPaths",git_config_count:"allowUnsafeConfigEnvCount",git_config:"allowUnsafeConfigPaths",git_editor:"allowUnsafeEditor",git_exec_path:"allowUnsafeConfigPaths",git_external_diff:"allowUnsafeDiffExternal",git_pager:"allowUnsafePager",git_proxy_command:"allowUnsafeGitProxy",git_template_dir:"allowUnsafeTemplateDir",git_sequence_editor:"allowUnsafeEditor",git_ssh:"allowUnsafeSshCommand",git_ssh_command:"allowUnsafeSshCommand",pager:"allowUnsafePager",prefix:"allowUnsafeConfigPaths",ssh_askpass:"allowUnsafeAskPass"};function*Q(e){const t=parseInt(e.git_config_count??"0",10);for(let n=0;n<t;n++){const o=e[`git_config_key_${n}`],s=e[`git_config_value_${n}`];o!==void 0&&(yield{key:o.toLowerCase().trim(),value:s,scope:"env"})}}function*X(e){for(const t of Object.keys(e))if(k(t)){const n=y[t];yield{category:n,message:`Use of "${t.toUpperCase()}" is not permitted without enabling ${n}`}}}function k(e){return Object.hasOwn(y,e)}function Z(e){const t={};for(const[n,o]of Object.entries(e)){const s=n.toLowerCase().trim();(k(s)||s.startsWith("git"))&&(t[s]=String(o))}return t}function _(e){const t=Z(e),n={read:[],write:[...Q(t)]},o=[...X(t),...C(null,[],n)];return{config:n,vulnerabilities:o}}function ee(e,t){return[...x(...e).vulnerabilities,..._(t).vulnerabilities]}exports.parseArgv=x;exports.parseEnv=_;exports.vulnerabilityCheck=ee;
+//# sourceMappingURL=index.cjs.map
 
 
 /***/ }),

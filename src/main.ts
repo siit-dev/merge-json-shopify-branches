@@ -17,7 +17,8 @@ import {
 import {stageAndCommitPostMergeChanges} from './git-staging'
 
 const defaults: Record<string, string> = {
-  'json-paths': 'config/*.json,locales/*.json,templates/*.json',
+  'json-paths':
+    'config/*.json,locales/*.json,templates/**/*.json,sections/**/*.json',
   'main-branch': 'main',
   'production-branch': 'production',
   'live-mirror-branch': 'live-mirror',

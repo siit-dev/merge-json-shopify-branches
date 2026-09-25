@@ -80,7 +80,7 @@ jobs:
 
 | Parameter                        | Description                    | Default                                                                                                                                                      |
 | -------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `json-paths`                     | JSON paths to merge            | `config/*.json,locales/*.json,templates/**/*.json`                                                                                                           |
+| `json-paths`                     | JSON paths to merge            | `config/*.json,locales/*.json,templates/**/*.json,sections/**/*.json`                                                                                         |
 | `main-branch`                    | Main branch                    | `main`                                                                                                                                                       |
 | `production-branch`              | Production branch              | `production`                                                                                                                                                 |
 | `live-mirror-branch`             | Live mirror branch             | `live-mirror`                                                                                                                                                |
@@ -100,6 +100,8 @@ jobs:
 | `postMergeCommand`               | Alias for `post-merge-script` | Leave blank to skip                                                                                                                                          |
 | `post-merge-script-command-continue-on-error` | Continue when the post-merge script or command fails | `false`                                                                                                                           |
 | `postMergeScriptCommandContinueOnError` | Alias for `post-merge-script-command-continue-on-error` | `false`                                                                                                                       |
+
+Automated commits include Shopify shop and editor information in the commit body when the `live-mirror` commits provide it. The title remains the configured `commit-message`. A `Shopify-Source-Commit` footer prevents older editors from being included again; on the first run, the action uses the last `[AUTOMATED]` commit time as a best-effort boundary.
 
 ## Post-merge hooks
 
