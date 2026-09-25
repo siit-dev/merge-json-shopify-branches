@@ -190,7 +190,7 @@ async function run(): Promise<void> {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return (prettier as any).format(json, {...config, filepath: filePath})
         } catch (e: unknown) {
-          const err = e as NodeJS.ErrnoException
+          const err = e as {code?: string}
           if (err?.code === 'MODULE_NOT_FOUND') {
             // A plugin listed in the config couldn't be loaded — retry without plugins.
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
