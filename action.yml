@@ -107,10 +107,30 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Add Shopify CLI to PATH
+    - name: Select compatible Shopify CLI
+      id: shopify-cli-version
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
-      run: echo "$HOME/.npm-global-shopify/bin" >> $GITHUB_PATH
+      run: |
+        # Both pins retain the JSON contract consumed by the bundled merger.
+        node <<'NODE' >> "$GITHUB_OUTPUT"
+        const [major, minor] = process.versions.node.split('.').map(Number);
+        let version;
+        if (major > 22 || (major === 22 && minor >= 12)) {
+          version = '4.9.4';
+        } else if (
+          (major === 18 && minor >= 20) ||
+          (major === 20 && minor >= 10) ||
+          major === 21 || major === 22
+        ) {
+          version = '3.70.0';
+        } else {
+          throw new Error(`Unsupported Node ${process.versions.node}: use Node 18.20.x or Node 20.10+.`);
+        }
+        console.log(`version=${version}`);
+        console.log(`node-major=${major}`);
+        NODE
+        echo "$HOME/.npm-global-shopify/bin" >> "$GITHUB_PATH"
 
     - name: Cache Shopify CLI
       id: cache-shopify-cli
@@ -118,17 +138,42 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.npm-global-shopify
-        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-v1
+        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-node${{ steps.shopify-cli-version.outputs.node-major }}-${{ steps.shopify-cli-version.outputs.version }}-v2
 
     - name: Install Shopify CLI
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
+      env:
+        EXPECTED_SHOPIFY_CLI_VERSION: ${{ steps.shopify-cli-version.outputs.version }}
       run: |
-        if command -v shopify &> /dev/null; then
-          echo "Shopify CLI already available: $(shopify version)"
-        else
-          npm install -g --prefix "$HOME/.npm-global-shopify" @shopify/cli @shopify/theme
+        cli_prefix="$HOME/.npm-global-shopify"
+        verify_cli() {
+          node - "$cli_prefix" "$EXPECTED_SHOPIFY_CLI_VERSION" <<'NODE'
+        const fs = require('node:fs');
+        const path = require('node:path');
+        try {
+          const [prefix, expected] = process.argv.slice(2);
+          const root = path.join(prefix, 'lib', 'node_modules', '@shopify', 'cli');
+          const metadata = require(path.join(root, 'package.json'));
+          const executable = path.join(prefix, 'bin', 'shopify');
+          const target = typeof metadata.bin === 'string' ? metadata.bin : metadata.bin.shopify;
+          fs.accessSync(executable, fs.constants.X_OK);
+          if (metadata.version !== expected || fs.realpathSync(executable) !== fs.realpathSync(path.join(root, target))) {
+            process.exit(1);
+          }
+        } catch {
+          process.exit(1);
+        }
+        NODE
+        }
+        if ! verify_cli; then
+          npm install -g --prefix "$cli_prefix" "@shopify/cli@$EXPECTED_SHOPIFY_CLI_VERSION"
+          if ! verify_cli; then
+            echo "::error::Shopify CLI installation does not match $EXPECTED_SHOPIFY_CLI_VERSION."
+            exit 1
+          fi
         fi
+        echo "Using Shopify CLI $EXPECTED_SHOPIFY_CLI_VERSION from $cli_prefix."
 
     - name: Print out the current directory
       shell: bash
