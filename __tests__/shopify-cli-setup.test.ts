@@ -31,8 +31,8 @@ function fixture(): {root: string; env: NodeJS.ProcessEnv} {
   fs.writeFileSync(
     path.join(bin, 'node'),
     `#!/bin/sh
-if [ -n "$TEST_NODE_VERSION" ]; then
-  exec "$TEST_NODE_EXECUTABLE" -e 'Object.defineProperty(process.versions,"node",{value:process.env.TEST_NODE_VERSION}); require("vm").runInThisContext(require("fs").readFileSync(0,"utf8"));'
+if [ -n "$TEST_NODE_VERSION$TEST_PLATFORM" ]; then
+  exec "$TEST_NODE_EXECUTABLE" -e 'if(process.env.TEST_NODE_VERSION) Object.defineProperty(process.versions,"node",{value:process.env.TEST_NODE_VERSION}); if(process.env.TEST_PLATFORM) Object.defineProperty(process,"platform",{value:process.env.TEST_PLATFORM}); require("vm").runInThisContext(require("fs").readFileSync(0,"utf8"));' "$@"
 fi
 exec "$TEST_NODE_EXECUTABLE" "$@"
 `,
@@ -45,6 +45,7 @@ exec "$TEST_NODE_EXECUTABLE" "$@"
     GITHUB_OUTPUT: path.join(root, 'output'),
     GITHUB_PATH: path.join(root, 'github-path'),
     TEST_CLI_PREFIX: path.join(root, 'prefix'),
+    SHOPIFY_CLI_INSTALL_PREFIX: path.join(root, 'prefix'),
     TEST_INSTALL_LOG: path.join(root, 'installs'),
     TEST_MERGE_MARKER: path.join(root, 'merged'),
     EXPECTED_SHOPIFY_CLI_VERSION: '4.9.4'
@@ -52,10 +53,15 @@ exec "$TEST_NODE_EXECUTABLE" "$@"
   return {root, env}
 }
 
-function fakeInstall(prefix: string, version: string): void {
+function fakeInstall(prefix: string, version: string, windows = false): void {
   const fs = require('fs')
   const path = require('path')
-  const root = path.join(prefix, 'lib', 'node_modules', '@shopify', 'cli')
+  const root = path.join(
+    prefix,
+    windows ? 'node_modules' : 'lib/node_modules',
+    '@shopify',
+    'cli'
+  )
   const executable = path.join(root, 'bin', 'run.js')
   fs.mkdirSync(path.dirname(executable), {recursive: true})
   fs.mkdirSync(path.join(prefix, 'bin'), {recursive: true})
@@ -64,6 +70,18 @@ function fakeInstall(prefix: string, version: string): void {
     JSON.stringify({version, bin: {shopify: 'bin/run.js'}})
   )
   fs.writeFileSync(executable, '#!/bin/sh\nexit 0\n', {mode: 0o755})
+  if (windows) {
+    const reference = 'node_modules/@shopify/cli/bin/run.js'
+    fs.writeFileSync(
+      path.join(prefix, 'shopify'),
+      `#!/bin/sh\nnode "$basedir/${reference}" "$@"\n`
+    )
+    fs.writeFileSync(
+      path.join(prefix, 'shopify.cmd'),
+      `@node "%dp0%\\${reference.replace(/\//g, '\\')}" %*\r\n`
+    )
+    return
+  }
   const link = path.join(prefix, 'bin', 'shopify')
   fs.rmSync(link, {force: true})
   fs.symlinkSync(executable, link)
@@ -78,7 +96,7 @@ const fs = require('fs');
 fs.appendFileSync(process.env.TEST_INSTALL_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
 if (process.env.TEST_INSTALL_FAIL) process.exit(42);
 const install = ${fakeInstall.toString()};
-install(process.env.TEST_CLI_PREFIX, process.env.TEST_WRONG_INSTALL || process.env.EXPECTED_SHOPIFY_CLI_VERSION);
+install(process.env.TEST_CLI_PREFIX, process.env.TEST_WRONG_INSTALL || process.env.EXPECTED_SHOPIFY_CLI_VERSION, process.env.TEST_PLATFORM === 'win32');
 `,
     {mode: 0o755}
   )
@@ -86,10 +104,7 @@ install(process.env.TEST_CLI_PREFIX, process.env.TEST_WRONG_INSTALL || process.e
 }
 
 function runInstaller(env: NodeJS.ProcessEnv): ReturnType<typeof spawnSync> {
-  const script = installation.run!.replace(
-    /\$HOME\/\.npm-global-shopify/g,
-    '$TEST_CLI_PREFIX'
-  )
+  const script = installation.run!
   return spawnSync(
     'bash',
     [
@@ -105,6 +120,19 @@ function runInstaller(env: NodeJS.ProcessEnv): ReturnType<typeof spawnSync> {
 }
 
 describe('compatible CLI selection', () => {
+  test('adds the Windows npm prefix itself to PATH', () => {
+    const {env} = fixture()
+    execFileSync('bash', ['-eo', 'pipefail', '-c', selection.run!], {
+      env: {...env, TEST_NODE_VERSION: '24.0.0', TEST_PLATFORM: 'win32'}
+    })
+    const output = fs.readFileSync(env.GITHUB_OUTPUT!, 'utf8')
+    const prefix = output
+      .split('\n')
+      .find(line => line.startsWith('prefix='))!
+      .slice('prefix='.length)
+    expect(fs.readFileSync(env.GITHUB_PATH!, 'utf8').trim()).toBe(prefix)
+  })
+
   test.each([
     ['18.20.8', '3.70.0'],
     ['20.10.0', '3.70.0'],
@@ -138,6 +166,35 @@ describe('compatible CLI selection', () => {
 })
 
 describe('isolated CLI installation', () => {
+  test.each(['missing', 'cached', 'v5'])(
+    'handles a %s Windows npm installation',
+    state => {
+      const {env} = installerFixture()
+      if (state !== 'missing') {
+        fakeInstall(
+          env.TEST_CLI_PREFIX!,
+          state === 'v5' ? '5.0.0' : '4.9.4',
+          true
+        )
+      }
+      const result = runInstaller({...env, TEST_PLATFORM: 'win32'})
+      expect(result.status).toBe(0)
+      expect(fs.existsSync(env.TEST_INSTALL_LOG!)).toBe(state !== 'cached')
+      expect(fs.existsSync(env.TEST_MERGE_MARKER!)).toBe(true)
+    }
+  )
+
+  test('repairs Windows shims that point at a different package', () => {
+    const {env} = installerFixture()
+    fakeInstall(env.TEST_CLI_PREFIX!, '4.9.4', true)
+    fs.writeFileSync(
+      path.join(env.TEST_CLI_PREFIX!, 'shopify.cmd'),
+      '@node other-package\\run.js\r\n'
+    )
+    expect(runInstaller({...env, TEST_PLATFORM: 'win32'}).status).toBe(0)
+    expect(fs.existsSync(env.TEST_INSTALL_LOG!)).toBe(true)
+  })
+
   test('a cache miss installs the exact version into the dedicated prefix', () => {
     const {env} = installerFixture()
     const result = runInstaller(env)
