@@ -30,7 +30,7 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "@smartimpact-it/json-merge-shopify": "git+https://github.com/siit-dev/json-merge-shopify.git#fd8009d0119238fe45bd48d3d2315cae6ef43a2a"
+    "@smartimpact-it/json-merge-shopify": "1.0.42"
   },
   "devDependencies": {
     "@types/node": "^20.3.1",
