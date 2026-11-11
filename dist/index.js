@@ -3208,53 +3208,94 @@ class GitMerger {
      */
     async validateJson(paths) {
         await this.logWarning('Checking JSON validity using `shopify theme check`');
+        let stdout;
+        let exitCode = 0;
+        let diagnostics = '';
         try {
-            // Execute "shopify theme check" command and get the output as JSON.
-            await execAsync('shopify theme check  -o json');
-            await this.logSuccess('JSON files are valid.');
+            ({ stdout } = await execAsync('shopify theme check --output json --no-color', {
+                cwd: this.gitRoot || undefined,
+                // Shopify resolves npm's INIT_CWD before the subprocess working directory.
+                env: { ...process.env, INIT_CWD: this.gitRoot || process.cwd() },
+                maxBuffer: 64 * 1024 * 1024,
+            }));
         }
         catch (error) {
-            const { stdout, stderr } = error;
-            // The JSON is only the first line of the output.
-            const json = stdout.split('\n').slice(0, 1).join('');
-            let result = [];
-            if (json.trim() != '') {
-                try {
-                    const rawResult = JSON5.parse(json);
-                    // Keep only the JSON files with errors that match the glob patterns
-                    result = rawResult
-                        .filter((item) => item.errorCount > 0)
-                        .filter((item) => item.path.endsWith('.json'))
-                        .filter((item) => paths.find((path) => item.path.endsWith(path)));
-                }
-                catch (error) {
-                    await this.logError('The JSON output is not valid. Is theme-check installed?');
-                    await this.logInfo(json);
-                    await this.logWarning(stdout);
-                    await this.logError(stderr);
-                    await this.logError(error.toString());
-                    // If the JSON is not valid, we should throw an error.
-                    if (this.failIfThemeCheckMissing) {
-                        throw error;
-                    }
-                    else {
-                        return true;
-                    }
-                }
+            if (error.code === 127 && !this.failIfThemeCheckMissing) {
+                await this.logWarning('Shopify CLI was not found; validation was explicitly disabled for a missing tool.');
+                return true;
             }
-            // Create a list of paths with errors
-            if (result.length > 0) {
-                const errorPaths = result.map((item) => {
-                    const offenses = item.offenses.map((offense) => {
-                        return `${offense.start_row}:${offense.start_column} - ${offense.message}`;
-                    });
-                    return `  - ${item.path} (${offenses.join(', ')})`;
-                });
-                await this.logWarning('There are errors in the JSON files. Please fix them first.');
-                await this.logError('The following files have errors:\n' + errorPaths.join('\n'));
-                return false;
+            if (typeof error.code !== 'number' || error.signal) {
+                throw new Error('Shopify Theme Check could not run.');
+            }
+            stdout = String(error.stdout ?? '');
+            diagnostics = String(error.stderr ?? '').trim();
+            exitCode = error.code;
+        }
+        // Legacy CLI versions can append a known agent hint after a complete report.
+        const text = stdout
+            .replace(/^\s*<claude-code-hint\b[^>]*\/>\s*$/gm, '')
+            .trim();
+        let report;
+        try {
+            report = JSON.parse(text);
+        }
+        catch {
+            throw new Error('Shopify Theme Check did not return a complete JSON report.');
+        }
+        if (report?.error)
+            throw new Error(report.error.message || 'Shopify Theme Check failed.');
+        const issues = Array.isArray(report)
+            ? report.flatMap((file) => {
+                if (typeof file?.path !== 'string' || !Array.isArray(file.offenses))
+                    throw new Error('Invalid legacy Theme Check report.');
+                return file.offenses.map((offense) => ({
+                    filePath: file.path,
+                    severity: offense.severity,
+                    message: offense.message,
+                    startRow: Math.max(offense.start_row + 1, 1),
+                    startColumn: Math.max(offense.start_column + 1, 1),
+                }));
+            })
+            : report?.issues;
+        if (!Array.isArray(issues) ||
+            (!Array.isArray(report) && typeof report.valid !== 'boolean')) {
+            throw new Error('Shopify Theme Check returned an unexpected report.');
+        }
+        for (const issue of issues) {
+            if (typeof issue.filePath !== 'string' ||
+                typeof issue.message !== 'string' ||
+                !['error', 'warning', 'info'].includes(issue.severity) ||
+                !Number.isInteger(issue.startRow) ||
+                issue.startRow < 1 ||
+                !Number.isInteger(issue.startColumn) ||
+                issue.startColumn < 1) {
+                throw new Error('Shopify Theme Check returned an invalid issue.');
             }
         }
+        if ((!Array.isArray(report) &&
+            report.valid === false &&
+            issues.length === 0) ||
+            (exitCode !== 0 &&
+                (exitCode !== 1 || report.valid === true || issues.length === 0))) {
+            throw new Error(`Shopify Theme Check failed without a usable validation report (${exitCode}). ${diagnostics}`);
+        }
+        const root = this.gitRoot || process.cwd();
+        const canonical = (file) => {
+            const absolute = path_1.default.resolve(root, file);
+            return fs.existsSync(absolute) ? fs.realpathSync(absolute) : absolute;
+        };
+        const selected = new Set(paths.map(canonical));
+        const errors = issues.filter((issue) => issue.severity === 'error' &&
+            issue.filePath.endsWith('.json') &&
+            selected.has(canonical(issue.filePath)));
+        if (errors.length) {
+            await this.logError('The following JSON files have errors:\n' +
+                errors
+                    .map((issue) => `  - ${issue.filePath} (${issue.startRow}:${issue.startColumn} - ${issue.message})`)
+                    .join('\n'));
+            return false;
+        }
+        await this.logSuccess('JSON files are valid.');
         return true;
     }
     /**

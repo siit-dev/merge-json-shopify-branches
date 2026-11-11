@@ -1,3 +1,32 @@
+# Merge Shopify JSON files — v2
+
+Version 2 requires Node 24 or newer. Run `actions/setup-node` with `node-version: 24`
+before invoking this composite action. It uses a private Shopify CLI 5.0.1 installation,
+with a versioned cache and PATH entry, rather than a CLI already installed on the runner.
+The standalone `@shopify/theme` package is not needed.
+
+Pin the immutable v2 release commit in consumers. The `releases/v1` channel remains
+unchanged for existing projects. This release is coordinated with
+`@smartimpact-it/json-merge-shopify` 1.0.42; publish that package before releasing v2.
+
+## Release preparation (not yet published)
+
+This draft pins the immutable library review commit from
+[json-merge-shopify#9](https://github.com/siit-dev/json-merge-shopify/pull/9), which
+contains version 1.0.42. The manifest and lockfile use HTTPS so review installs
+need no SSH key. Before releasing:
+
+1. Merge and manually publish library 1.0.42.
+2. Replace this Git dependency with exact npm version `1.0.42`, regenerate the
+   lockfile, and run `npm ci`, tests, build and package on Node 24.
+3. Commit the rebuilt `dist/` and manually release/tag v2.0.0 at that commit.
+4. Pin that immutable release commit in the theme's two merge workflows. Leave
+   `releases/v1` at its existing commit.
+
+The v2 code starts from released v1 (1f6b128), since `main` has diverged from the
+production implementation. The PR into `main` therefore also carries existing
+v1 functionality; the migration itself is reviewable against that v1 commit.
+
 # Merge Shopify JSONs between branches
 
 This action is used to merge Shopify JSONs between branches. It will merge the JSONs from the source branch into the target branch and commit the changes.
@@ -62,7 +91,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: siit-dev/merge-json-shopify-branches@releases/v1
+      - uses: siit-dev/merge-json-shopify-branches@v2.0.0
         id: merge-json
         with:
           push-after-commit: false

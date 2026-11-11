@@ -1,6 +1,6 @@
 {
   "name": "merge-json-shopify-branches",
-  "version": "1.0.28",
+  "version": "2.0.0",
   "private": true,
   "description": "GitHub action to merge json files from shopify theme branches",
   "main": "lib/main.js",
@@ -30,10 +30,7 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "@shopify/cli": "^3.56.0",
-    "@shopify/theme": "^3.56.0",
-    "@shopify/cli-kit": "^3.56.0",
-    "@smartimpact-it/json-merge-shopify": "1.0.41"
+    "@smartimpact-it/json-merge-shopify": "git+https://github.com/siit-dev/json-merge-shopify.git#472f00172b884f1f65b401d064d309d226967a3f"
   },
   "devDependencies": {
     "@types/node": "^20.3.1",
@@ -48,5 +45,8 @@
     "prettier": "^2.8.8",
     "ts-jest": "^29.1.0",
     "typescript": "^5.1.3"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

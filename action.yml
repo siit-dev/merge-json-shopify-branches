@@ -107,27 +107,33 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Add Shopify CLI to PATH
+    - name: Configure private Shopify CLI
       shell: bash
-      if: ${{ inputs.check-json-validity == 'true' }}
-      run: echo "$HOME/.npm-global-shopify/bin" >> $GITHUB_PATH
+      run: |
+        node -e "if (Number(process.versions.node.split('.')[0]) < 24) { console.error('This action requires Node 24 or newer. Run actions/setup-node with node-version: 24 first.'); process.exit(1); }"
+        cli_prefix="$HOME/.npm-global-shopify/5.0.1"
+        echo "SHOPIFY_CLI_PREFIX=$cli_prefix" >> "$GITHUB_ENV"
+        echo "$cli_prefix/node_modules/.bin" >> "$GITHUB_PATH"
 
     - name: Cache Shopify CLI
       id: cache-shopify-cli
       if: ${{ inputs.check-json-validity == 'true' }}
       uses: actions/cache@v4
       with:
-        path: ~/.npm-global-shopify
-        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-v1
+        path: ${{ env.SHOPIFY_CLI_PREFIX }}
+        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-5.0.1
 
     - name: Install Shopify CLI
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
       run: |
-        if command -v shopify &> /dev/null; then
-          echo "Shopify CLI already available: $(shopify version)"
-        else
-          npm install -g --prefix "$HOME/.npm-global-shopify" @shopify/cli @shopify/theme
+        if [ ! -x "$SHOPIFY_CLI_PREFIX/node_modules/.bin/shopify" ]; then
+          npm install --no-save --package-lock=false --prefix "$SHOPIFY_CLI_PREFIX" --no-audit --no-fund @shopify/cli@5.0.1
+        fi
+        installed_version=$(CI=1 SHOPIFY_CLI_NO_ANALYTICS=1 "$SHOPIFY_CLI_PREFIX/node_modules/.bin/shopify" version)
+        if [ "$installed_version" != "5.0.1" ]; then
+          echo "Expected private Shopify CLI 5.0.1; found $installed_version" >&2
+          exit 1
         fi
 
     - name: Print out the current directory
