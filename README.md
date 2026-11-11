@@ -47,7 +47,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: siit-dev/merge-json-shopify-branches@v2.0.0
+      - uses: siit-dev/merge-json-shopify-branches@v2.0.1
 ```
 
 ## Usage with protected branches
@@ -86,7 +86,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: siit-dev/merge-json-shopify-branches@v2.0.0
+      - uses: siit-dev/merge-json-shopify-branches@v2.0.1
         id: merge-json
         with:
           push-after-commit: false
@@ -130,6 +130,8 @@ Automated commits include Shopify shop and editor information in the commit body
 ## Post-merge hooks
 
 Post-merge hooks run only when the merge finishes without conflicts or errors. They run before the action creates a commit.
+
+Both hook types run with the consumer repository root as their working directory.
 
 Use `post-merge-node-script` when you want to run a repository-relative Node.js script. The action resolves the path from the repository root and runs it with Node.
 

@@ -468,6 +468,7 @@ const runHookCommand = (label, command, context, continueOnError, logger, execut
         logger.info(`Running ${label}: ${command}`);
         executor(command, {
             encoding: 'utf8',
+            cwd: context.gitRoot,
             env: (0, exports.buildPostMergeHookEnv)(context),
             stdio: 'inherit'
         });

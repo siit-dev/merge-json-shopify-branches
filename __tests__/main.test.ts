@@ -1,4 +1,13 @@
 import * as path from 'path'
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
+import {tmpdir} from 'os'
 import {describe, expect, jest, test} from '@jest/globals'
 import {ExecFileSyncOptions} from 'child_process'
 import {
@@ -45,6 +54,43 @@ const createGitExecutor = (
 }
 
 describe('post-merge hooks', () => {
+  test.each(['node', 'shell'])(
+    'runs real %s hooks from the consumer repository',
+    type => {
+      const root = realpathSync(
+        mkdtempSync(path.join(tmpdir(), 'action-hooks-'))
+      )
+      const repository = path.join(root, 'consumer repo')
+      mkdirSync(repository)
+      writeFileSync(path.join(repository, 'sentinel.txt'), 'consumer data')
+      writeFileSync(
+        path.join(repository, 'hook.cjs'),
+        "const fs = require('fs'); fs.writeFileSync('result.txt', fs.readFileSync('sentinel.txt', 'utf8'));"
+      )
+      try {
+        runPostMergeHooks(
+          {
+            postMergeNodeScript: type === 'node' ? 'hook.cjs' : '',
+            postMergeScript: type === 'shell' ? 'node hook.cjs' : '',
+            continueOnError: false
+          },
+          {
+            gitRoot: repository,
+            mergedFiles: [],
+            hasConflict: false,
+            hasErrors: false
+          },
+          createLogger()
+        )
+        expect(readFileSync(path.join(repository, 'result.txt'), 'utf8')).toBe(
+          'consumer data'
+        )
+      } finally {
+        rmSync(root, {recursive: true, force: true})
+      }
+    }
+  )
+
   test('runs post-merge-node-script as a Node script', () => {
     const logger = createLogger()
     const executor = createExecutor()

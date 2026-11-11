@@ -1,6 +1,6 @@
 {
   "name": "merge-json-shopify-branches",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "GitHub action to merge json files from shopify theme branches",
   "main": "lib/main.js",
