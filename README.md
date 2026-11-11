@@ -1,3 +1,19 @@
+# Merge Shopify JSON files — v2
+
+Version 2 requires Node 24 or newer. Run `actions/setup-node` with `node-version: 24`
+before invoking this composite action. It uses a private Shopify CLI 5.0.1 installation,
+with a versioned cache and PATH entry, rather than a CLI already installed on the runner.
+The standalone `@shopify/theme` package is not needed.
+
+Pin the immutable v2 release commit in consumers. The `releases/v1` channel remains
+unchanged for existing projects. This release is coordinated with
+`@smartimpact-it/json-merge-shopify` 1.0.42, installed from npm and included in the
+checked-in action bundle.
+
+The v2 code starts from released v1 (1f6b128), since `main` has diverged from the
+production implementation. The PR into `main` therefore also carries existing
+v1 functionality; the migration itself is reviewable against that v1 commit.
+
 # Merge Shopify JSONs between branches
 
 This action is used to merge Shopify JSONs between branches. It will merge the JSONs from the source branch into the target branch and commit the changes.
@@ -13,17 +29,10 @@ concurrency:
 
 on:
   workflow_dispatch:
-    inputs:
-      merge:
-        description: 'Merge JSON files (true/false)'
-        required: true
-        default: 'false'
 
 env:
-  NODE_VERSION: 18
-  NPM_VERSION: 9
-  COMMIT_CHANGES: true
-  NO_VALIDITY_CHECK: true
+  NODE_VERSION: 24
+  NPM_VERSION: 11
 
 jobs:
   merge-json:
@@ -34,10 +43,107 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v3.6.0
         with:
-          node-version: 18
+          node-version: ${{ env.NODE_VERSION }}
 
-      - uses: @smartimpact-it/merge-shopify-jsons@v1
-
+      - uses: siit-dev/merge-json-shopify-branches@v2.0.0
 ```
+
+## Usage with protected branches
+
+If the `main` branch is a protected Github branch, you will need to use a Personal Access Token with the `repo` scope to commit the changes. For example, you can use the [`CasperWA/push-protected`](https://github.com/CasperWA/push-protected) action to commit the changes.
+
+You will also need to pass the `push-after-commit` input to the action and set it to `false`. This will prevent the action from pushing the changes to the remote repository. Then you can use the `CasperWA/push-protected` action to push the changes to the remote repository.
+
+Also make sure to create the `PUSH_TO_PROTECTED_BRANCH` secret in the repository settings and add the Personal Access Token as the value. The PAT should have the `repo` scope and be created by an `admin` of the repository ([see more](https://github.com/CasperWA/push-protected#pat-user-permissions)).
+
+```yaml
+name: Merge JSON files
+
+concurrency:
+  group: main
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 24
+  NPM_VERSION: 11
+
+jobs:
+  merge-json:
+    name: Merge JSON files
+    runs-on: ubuntu-latest
+    if: github.event.inputs.merge == 'true' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v3.6.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: siit-dev/merge-json-shopify-branches@v2.0.0
+        id: merge-json
+        with:
+          push-after-commit: false
+
+      - name: Push the changes, if there are any
+        if: success() && steps.merge-json.outputs.hasCommitted == 'true'
+        uses: CasperWA/push-protected@v2
+        with:
+          token: ${{ secrets.PUSH_TO_PROTECTED_BRANCH }}
+          branch: main
+          unprotect_reviews: true
+```
+
+## Parameters
+
+| Parameter                        | Description                    | Default                                                                                                                                                      |
+| -------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `json-paths`                     | JSON paths to merge            | `config/*.json,locales/*.json,templates/**/*.json,sections/**/*.json`                                                                                         |
+| `main-branch`                    | Main branch                    | `main`                                                                                                                                                       |
+| `production-branch`              | Production branch              | `production`                                                                                                                                                 |
+| `live-mirror-branch`             | Live mirror branch             | `live-mirror`                                                                                                                                                |
+| `check-json-validity`            | Check JSON validity            | `true`                                                                                                                                                       |
+| `formatter-command`              | Formatter command              | Leave blank to use Prettier                                                                                                                                  |
+| `commit-message`                 | Commit message                 | ` [AUTOMATED] Update JSON files from ``#liveMirror#`` branch: #files# `                                                                                      |
+| `push-after-commit`              | Push after commit              | `true`                                                                                                                                                       |
+| `preferred`                      | Preferred merge strategy       | `theirs`                                                                                                                                                     |
+| `exit-if-no-existing-deployment` | Exit if no existing deployment | `true`                                                                                                                                                       |
+| `config-git-user`                | Configure git user             | `true`                                                                                                                                                       |
+| `verbose`                        | Verbose                        | `false`                                                                                                                                                      |
+| `config-file`                    | Config file                    | The path to a config file that will be used to load the settings. See [json-merge-shopify](https://www.npmjs.com/package/@smartimpact-it/json-merge-shopify) |
+| `create-commit`                  | Create a commit after merging  | `true`                                                                                                                                                       |
+| `post-merge-node-script`         | Path to a Node.js script to run after merging and before committing, relative to the repository root | Leave blank to skip                                                                                                                         |
+| `post-merge-script`              | Shell command to run after merging and before committing | Leave blank to skip                                                                                                                                 |
+| `post-merge-command`             | Alias for `post-merge-script` | Leave blank to skip                                                                                                                                  |
+| `postMergeCommand`               | Alias for `post-merge-script` | Leave blank to skip                                                                                                                                          |
+| `post-merge-script-command-continue-on-error` | Continue when the post-merge script or command fails | `false`                                                                                                                           |
+| `postMergeScriptCommandContinueOnError` | Alias for `post-merge-script-command-continue-on-error` | `false`                                                                                                                       |
+
+Automated commits include Shopify shop and editor information in the commit body when the `live-mirror` commits provide it. The title remains the configured `commit-message`. A `Shopify-Source-Commit` footer prevents older editors from being included again; on the first run, the action uses the last `[AUTOMATED]` commit time as a best-effort boundary.
+
+## Post-merge hooks
+
+Post-merge hooks run only when the merge finishes without conflicts or errors. They run before the action creates a commit.
+
+Use `post-merge-node-script` when you want to run a repository-relative Node.js script. The action resolves the path from the repository root and runs it with Node.
+
+Use `post-merge-script` when you want to run a shell command exactly as provided. The command is not prefixed with `node`, so it can call any executable available in the runner environment. `post-merge-command` and `postMergeCommand` are supported as aliases for this raw command hook.
+
+If both `post-merge-node-script` and `post-merge-script` are configured, the Node script runs first and the raw script command runs second. If `post-merge-script` and a command alias are both configured, `post-merge-script` takes precedence. If both command aliases are configured without `post-merge-script`, `post-merge-command` takes precedence.
+
+By default, a failing post-merge script or command fails the action and prevents the commit step from running. Set `post-merge-script-command-continue-on-error` or `postMergeScriptCommandContinueOnError` to `true` to log the hook failure and continue.
+
+Both post-merge hook types receive these environment variables:
+
+| Variable       | Description                                      |
+| -------------- | ------------------------------------------------ |
+| `MERGED_FILES` | Comma-separated list of files merged by the action |
+| `HAS_CONFLICT` | `true` when the merge result has conflicts       |
+| `HAS_ERRORS`   | `true` when the merge result has errors          |
+| `GIT_ROOT`     | Repository root path                             |

@@ -11,14 +11,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 24
       - run: |
-          npm install
+          npm ci
       - run: |
           npm run all
+
   test: # make sure the action works on a clean machine without building
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: ./
         with:
-          milliseconds: 1000
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 24
+
+      - name: Create the `live-mirror` branch
+        run: |
+          git show-ref --verify --quiet refs/heads/main || git branch main HEAD
+          git show-ref --verify --quiet refs/heads/live-mirror || git branch live-mirror HEAD
+
+      - name: Run the action
+        uses: ./
+        with:
+          run-locally-only: 'true'
+          verbose: 'true'
+          github-token: ${{ github.token }}

@@ -6,147 +6,204 @@ author: 'SmartImpact IT'
 
 inputs:
   json-paths:
-    required: true
+    required: false
     description: 'JSON paths to merge'
-    default: 'config/settings_data.json,locales/en.default.json,locales/en.json'
+    default: 'config/*.json,locales/*.json,templates/**/*.json,sections/**/*.json'
   main-branch:
-    required: true
+    required: false
     description: 'Main branch'
     default: 'main'
   production-branch:
-    required: true
+    required: false
     description: 'Production branch'
     default: 'production'
   live-mirror-branch:
-    required: true
+    required: false
     description: 'Live mirror branch'
     default: 'live-mirror'
   check-json-validity:
-    required: true
+    required: false
     description: 'Check JSON validity'
     default: 'true'
   formatter-command:
-    required: true
-    description: 'Formatter'
-    default: 'prettier --write %s'
+    required: false
+    description: 'Formatter command'
   commit-message:
-    required: true
+    required: false
     description: 'Commit message'
     default: '[AUTOMATED] Update JSON files from `#liveMirror#` branch: #files#'
+  push-after-commit:
+    required: false
+    description: 'Push after commit'
+    default: 'true'
   preferred:
-    required: true
+    required: false
     description: 'Preferred merge strategy'
-    default: 'ours'
+    default: 'theirs'
   exit-if-no-existing-deployment:
-    required: true
+    required: false
     description: 'Exit if no existing deployment'
     default: 'true'
   run-locally-only:
-    required: true
+    required: false
     description: 'Run locally only'
     default: 'true'
+  config-git-user:
+    required: false
+    description: 'Configure git user'
+    default: 'true'
+  verbose:
+    required: false
+    description: 'Verbose'
+    default: 'false'
+  config-file:
+    required: false
+    description: 'Config file'
+  create-commit:
+    required: false
+    description: 'Create a commit after merging the JSON files'
+    default: 'true'
+  post-merge-node-script:
+    required: false
+    description: 'Path to a Node.js script to run after merging and before committing (relative to the repo root)'
+  post-merge-script:
+    required: false
+    description: 'Shell command to run after merging and before committing'
+  post-merge-command:
+    required: false
+    description: 'Alias for post-merge-script'
+  postMergeCommand:
+    required: false
+    description: 'Alias for post-merge-script'
+  post-merge-script-command-continue-on-error:
+    required: false
+    description: 'Continue the action when the post-merge script or command fails'
+    default: 'false'
+  postMergeScriptCommandContinueOnError:
+    required: false
+    description: 'Alias for post-merge-script-command-continue-on-error'
+    default: 'false'
 
 outputs:
-  stdout:
+  hasConflict:
+    description: 'Whether the merge process has conflicts'
+    value: ${{ steps.merge-json.outputs.hasConflict }}
+  hasErrors:
+    description: 'Whether the merge process has errors'
+    value: ${{ steps.merge-json.outputs.hasErrors }}
+  error:
+    description: 'The error message'
+    value: ${{ steps.merge-json.outputs.error }}
+  hasCommitted:
+    description: 'Whether the merge process has committed'
+    value: ${{ steps.merge-json.outputs.hasCommitted }}
+  mergedFiles:
+    description: 'The merged files'
+    value: ${{ steps.merge-json.outputs.mergedFiles }}
+  log:
     description: 'The output of the merge process'
-    value: ${{ steps.merge-json.outputs.stdout }}
-  success:
-    description: 'Whether the merge process was successful'
-    value: ${{ success() }}
+    value: ${{ steps.merge-json.outputs.log }}
 
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-
-    - uses: actions/setup-node@v3
-      with:
-        node-version: 18
-
-    - uses: ruby/setup-ruby@v1
-      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
-      with:
-        ruby-version: 3.2
-        bundler: 'latest'
-
-    - name: Install Ruby dependencies
+    - name: Configure private Shopify CLI
       shell: bash
-      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
       run: |
-        gem install theme-check
+        node -e "if (Number(process.versions.node.split('.')[0]) < 24) { console.error('This action requires Node 24 or newer. Run actions/setup-node with node-version: 24 first.'); process.exit(1); }"
+        cli_prefix="$HOME/.npm-global-shopify/5.0.1"
+        echo "SHOPIFY_CLI_PREFIX=$cli_prefix" >> "$GITHUB_ENV"
+        echo "$cli_prefix/node_modules/.bin" >> "$GITHUB_PATH"
 
-    - name: Get npm cache directory
-      id: npm-cache-dir
-      shell: bash
-      run: echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT
-
-    - name: Load NPM packages from cache
-      id: npm-cache
-      uses: actions/cache@v3
+    - name: Cache Shopify CLI
+      id: cache-shopify-cli
+      if: ${{ inputs.check-json-validity == 'true' }}
+      uses: actions/cache@v4
       with:
-        path: |
-          ${{ steps.npm-cache-dir.outputs.dir }}
-          **/node_modules
-        key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-${{ env.NODE_VERSION }}-
-          ${{ runner.os }}-node-
-
-    - name: Upgrade NPM to the correct version
-      shell: bash
-      env:
-        NPM_VERSION: ${{ env.NPM_VERSION }}
-      run: npm i -g npm@$NPM_VERSION
+        path: ${{ env.SHOPIFY_CLI_PREFIX }}
+        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-5.0.1
 
     - name: Install Shopify CLI
       shell: bash
-      if: ${{ inputs.check-json-validity == 'true' == 'false' }}
-      run: npm install -g @shopify/cli @shopify/theme
+      if: ${{ inputs.check-json-validity == 'true' }}
+      run: |
+        if [ ! -x "$SHOPIFY_CLI_PREFIX/node_modules/.bin/shopify" ]; then
+          npm install --no-save --package-lock=false --prefix "$SHOPIFY_CLI_PREFIX" --no-audit --no-fund @shopify/cli@5.0.1
+        fi
+        installed_version=$(CI=1 SHOPIFY_CLI_NO_ANALYTICS=1 "$SHOPIFY_CLI_PREFIX/node_modules/.bin/shopify" version)
+        if [ "$installed_version" != "5.0.1" ]; then
+          echo "Expected private Shopify CLI 5.0.1; found $installed_version" >&2
+          exit 1
+        fi
 
-    - name: Install node modules
+    - name: Print out the current directory
       shell: bash
-      if: steps.npm-cache.outputs.cache-hit != 'true'
-      run: npm install
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        pwd
+        echo $GITHUB_ACTION_PATH
 
-    - name: Cleanup before the merge
+    - name: Setup git
+      if: ${{ inputs.config-git-user == 'true' }}
       shell: bash
       run: |
-        git config user.name github-actions
-        git config user.email
-        git restore package-lock.json
-        rm -rf .husky
-        git status
+        git config --local user.name github-actions
+        git config --local user.email github-actions@github.com
 
-    - name: Run the merge
-      uses: ./subactions/merge
+    - name: Create local tracking branches for merger
+      shell: bash
+      env:
+        PRODUCTION_BRANCH: ${{ inputs.production-branch }}
+        LIVE_MIRROR_BRANCH: ${{ inputs.live-mirror-branch }}
+      run: |
+        git branch "$PRODUCTION_BRANCH" "origin/$PRODUCTION_BRANCH" 2>/dev/null || true
+        git branch "$LIVE_MIRROR_BRANCH" "origin/$LIVE_MIRROR_BRANCH" 2>/dev/null || true
+
+    - name: Run the merge code
       id: merge-json
-      with:
-        json-paths: ${{ inputs.json-paths }}
-        main-branch: ${{ inputs.main-branch }}
-        production-branch: ${{ inputs.production-branch }}
-        live-mirror-branch: ${{ inputs.live-mirror-branch }}
-        check-json-validity: ${{ inputs.check-json-validity }}
-        formatter-command: ${{ inputs.formatter-command }}
-        commit-message: ${{ inputs.commit-message }}
-        preferred: ${{ inputs.preferred }}
-        exit-if-no-existing-deployment: ${{ inputs.exit-if-no-existing-deployment }}
-        run-locally-only: ${{ inputs.run-locally-only }}
+      working-directory: ${{ github.action_path }}
+      shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        # Set the INPUT_ variables to the values of the action.yml inputs. These are not available in composite actions, so we have to pass them in manually.
+        # https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions#example-specifying-inputs
+        INPUT_JSON_PATHS: ${{ inputs.json-paths }}
+        INPUT_MAIN_BRANCH: ${{ inputs.main-branch }}
+        INPUT_PRODUCTION_BRANCH: ${{ inputs.production-branch }}
+        INPUT_LIVE_MIRROR_BRANCH: ${{ inputs.live-mirror-branch }}
+        INPUT_CHECK_JSON_VALIDITY: ${{ inputs.check-json-validity }}
+        INPUT_FORMATTER_COMMAND: ${{ inputs.formatter-command }}
+        INPUT_COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        INPUT_PREFERRED: ${{ inputs.preferred }}
+        INPUT_EXIT_IF_NO_EXISTING_DEPLOYMENT: ${{ inputs.exit-if-no-existing-deployment }}
+        INPUT_RUN_LOCALLY_ONLY: ${{ inputs.run-locally-only }}
+        INPUT_CONFIG_GIT_USER: ${{ inputs.config-git-user }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}
+        INPUT_CONFIG_FILE: ${{ inputs.config-file }}
+        INPUT_CREATE_COMMIT: ${{ inputs.create-commit }}
+        INPUT_POST_MERGE_NODE_SCRIPT: ${{ inputs.post-merge-node-script }}
+        INPUT_POST_MERGE_SCRIPT: ${{ inputs.post-merge-script }}
+        INPUT_POST_MERGE_COMMAND: ${{ inputs.post-merge-command }}
+        INPUT_POSTMERGECOMMAND: ${{ inputs.postMergeCommand }}
+        INPUT_POST_MERGE_SCRIPT_COMMAND_CONTINUE_ON_ERROR: ${{ inputs.post-merge-script-command-continue-on-error }}
+        INPUT_POSTMERGESCRIPTCOMMANDCONTINUEONERROR: ${{ inputs.postMergeScriptCommandContinueOnError }}
+      run: |
+        pwd
+        node dist/index.js
+
+    - name: Output the log
+      shell: bash
+      run: |
+        echo "${{ steps.merge-json.outputs.log }}"
 
     - name: See the git status
       shell: bash
       run: |
         git status
 
-    - name: Check JSON validity, if requested
-      shell: bash
-      if: ${{ success() && inputs.check-json-validity == 'true' }}
-      run: |
-        git status | grep 'Your branch is ahead' && shopify theme check -c json
-
     - name: Push the changes, if there are any
       shell: bash
-      if: success()
+      if: ${{ inputs.push-after-commit == 'true' && steps.merge-json.outputs.hasCommitted == 'true' }}
       run: |
         git status | grep 'Your branch is ahead' && git push && echo 'Pushed changes' || echo "No changes to push"
