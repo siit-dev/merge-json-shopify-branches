@@ -44,8 +44,8 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: 18
-  NPM_VERSION: 9
+  NODE_VERSION: 24
+  NPM_VERSION: 11
 
 jobs:
   merge-json:
@@ -56,7 +56,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: @smartimpact-it/merge-shopify-jsons@v1
+      - uses: actions/setup-node@v3.6.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: siit-dev/merge-json-shopify-branches@v2.0.0
 ```
 
 ## Usage with protected branches
@@ -78,8 +82,8 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: 18
-  NPM_VERSION: 9
+  NODE_VERSION: 24
+  NPM_VERSION: 11
 
 jobs:
   merge-json:
@@ -90,6 +94,10 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v3.6.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - uses: siit-dev/merge-json-shopify-branches@v2.0.0
         id: merge-json
