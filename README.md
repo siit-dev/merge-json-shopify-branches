@@ -2,6 +2,16 @@
 
 This action is used to merge Shopify JSONs between branches. It will merge the JSONs from the source branch into the target branch and commit the changes.
 
+## Shopify CLI compatibility
+
+When JSON validation is enabled, the action installs an exact CLI version in its own prefix without changing the caller's Node runtime:
+
+- Node 18.20.x or Node 20.10 through 22.11.x uses Shopify CLI `3.70.0`.
+- Node 22.12 or newer uses Shopify CLI `4.9.4`.
+- Unsupported Node versions fail before the merge. When JSON validation is disabled, no CLI is installed.
+
+Both pins retain the JSON report format consumed by the bundled merger. CLI v5 requires a separate parser migration. The cache key includes the CLI version, Node major, OS, architecture, and cache revision; restored installations are verified before use, independently of any global CLI.
+
 ## Usage
 
 ```yaml

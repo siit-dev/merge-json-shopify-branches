@@ -107,10 +107,36 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Add Shopify CLI to PATH
+    - name: Select compatible Shopify CLI
+      id: shopify-cli-version
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
-      run: echo "$HOME/.npm-global-shopify/bin" >> $GITHUB_PATH
+      run: |
+        # Both pins retain the JSON contract consumed by the bundled merger.
+        node <<'NODE' >> "$GITHUB_OUTPUT"
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const os = require('node:os');
+        const [major, minor] = process.versions.node.split('.').map(Number);
+        let version;
+        if (major > 22 || (major === 22 && minor >= 12)) {
+          version = '4.9.4';
+        } else if (
+          (major === 18 && minor >= 20) ||
+          (major === 20 && minor >= 10) ||
+          major === 21 || major === 22
+        ) {
+          version = '3.70.0';
+        } else {
+          throw new Error(`Unsupported Node ${process.versions.node}: use Node 18.20.x or Node 20.10+.`);
+        }
+        const prefix = path.join(os.homedir(), '.npm-global-shopify');
+        const binDirectory = process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+        console.log(`version=${version}`);
+        console.log(`node-major=${major}`);
+        console.log(`prefix=${prefix}`);
+        fs.appendFileSync(process.env.GITHUB_PATH, `${binDirectory}\n`);
+        NODE
 
     - name: Cache Shopify CLI
       id: cache-shopify-cli
@@ -118,17 +144,56 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.npm-global-shopify
-        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-v1
+        key: shopify-cli-${{ runner.os }}-${{ runner.arch }}-node${{ steps.shopify-cli-version.outputs.node-major }}-${{ steps.shopify-cli-version.outputs.version }}-v2
 
     - name: Install Shopify CLI
       shell: bash
       if: ${{ inputs.check-json-validity == 'true' }}
+      env:
+        EXPECTED_SHOPIFY_CLI_VERSION: ${{ steps.shopify-cli-version.outputs.version }}
+        SHOPIFY_CLI_INSTALL_PREFIX: ${{ steps.shopify-cli-version.outputs.prefix }}
       run: |
-        if command -v shopify &> /dev/null; then
-          echo "Shopify CLI already available: $(shopify version)"
-        else
-          npm install -g --prefix "$HOME/.npm-global-shopify" @shopify/cli @shopify/theme
+        cli_prefix="$SHOPIFY_CLI_INSTALL_PREFIX"
+        verify_cli() {
+          node - "$cli_prefix" "$EXPECTED_SHOPIFY_CLI_VERSION" <<'NODE'
+        const fs = require('node:fs');
+        const path = require('node:path');
+        try {
+          const [prefix, expected] = process.argv.slice(2);
+          const windows = process.platform === 'win32';
+          const root = path.join(prefix, windows ? 'node_modules' : 'lib/node_modules', '@shopify', 'cli');
+          const metadata = require(path.join(root, 'package.json'));
+          const bin = typeof metadata.bin === 'string' ? metadata.bin : metadata.bin.shopify;
+          const target = path.resolve(root, bin);
+          fs.accessSync(target, fs.constants.F_OK);
+          if (metadata.version !== expected) {
+            process.exit(1);
+          }
+          if (windows) {
+            // npm creates shell/CMD shims in the prefix on Windows, not symlinks in bin/.
+            const reference = path.relative(prefix, target).replace(/\\/g, '/');
+            for (const name of ['shopify', 'shopify.cmd']) {
+              const shim = fs.readFileSync(path.join(prefix, name), 'utf8').replace(/\\/g, '/');
+              if (!shim.includes(reference)) process.exit(1);
+            }
+          } else {
+            const executable = path.join(prefix, 'bin', 'shopify');
+            fs.accessSync(executable, fs.constants.X_OK);
+            if (fs.realpathSync(executable) !== fs.realpathSync(target)) process.exit(1);
+          }
+        } catch {
+          process.exit(1);
+        }
+        NODE
+        }
+        if ! verify_cli; then
+          npm install -g --prefix "$cli_prefix" "@shopify/cli@$EXPECTED_SHOPIFY_CLI_VERSION"
+          if ! verify_cli; then
+            echo "::error::Shopify CLI installation does not match $EXPECTED_SHOPIFY_CLI_VERSION."
+            exit 1
+          fi
         fi
+        echo "Using Shopify CLI $EXPECTED_SHOPIFY_CLI_VERSION from $cli_prefix."
 
     - name: Print out the current directory
       shell: bash
